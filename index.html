@@ -9,51 +9,65 @@
 <body>
 
   <!-- Login Section -->
-  <div id="login-panel" style="margin-bottom: 20px;">
-    <input type="text" id="username-input" placeholder="Enter username..." />
-    <button onclick="login()">Log In</button>
+  <div id="login-panel">
+    <h2>Welcome to Chat</h2>
+    <p>Sign in with a username to get started</p>
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <input type="text" id="username-input" class="input-field" placeholder="Enter your display name..." />
+      <button class="btn" onclick="login()">Enter Chat</button>
+    </div>
   </div>
 
-  <!-- Main App Layout -->
+  <!-- Main App Shell -->
   <div id="app" class="hidden">
     <!-- Sidebar -->
     <div id="sidebar">
-      <div><strong>Logged in as: <span id="current-user-label"></span></strong></div>
-
-      <div class="section-title">Add Friend</div>
-      <div class="row">
-        <input type="text" id="target-username" placeholder="Username" style="width: 100%;" />
-        <button onclick="sendFriendRequest()">Add</button>
+      <div class="user-profile-header">
+        <div class="user-avatar" id="current-user-avatar">?</div>
+        <div class="user-meta">
+          <span class="name" id="current-user-label"></span>
+          <span class="tag"><span class="dot online"></span> Connected</span>
+        </div>
       </div>
 
-      <div class="section-title">Friend Requests</div>
-      <div id="requests-list"></div>
+      <!-- Add Friend Bar -->
+      <div class="section-title">Add Friend</div>
+      <div style="display: flex; gap: 6px;">
+        <input type="text" id="target-username" class="input-field" placeholder="Friend's username" style="flex-grow: 1; font-size: 13px; padding: 7px 10px;" />
+        <button class="btn btn-secondary btn-sm" onclick="sendFriendRequest()">Add</button>
+      </div>
 
+      <!-- Friend Requests Section -->
+      <div class="section-title">Friend Requests</div>
+      <div id="requests-list" class="sidebar-scrollable" style="max-height: 80px;"></div>
+
+      <!-- Groups Section -->
       <div class="section-title">
         <span>Groups</span>
-        <button onclick="openGroupModal()" style="font-size: 11px; padding: 2px 6px;">+ New</button>
+        <button class="btn btn-secondary btn-sm" onclick="openGroupModal()">+ New</button>
       </div>
-      <div id="groups-list" style="max-height: 120px; overflow-y: auto;"></div>
+      <div id="groups-list" class="sidebar-scrollable" style="max-height: 120px;"></div>
 
+      <!-- Direct Messages Section -->
       <div class="section-title">Direct Messages</div>
-      <div id="friends-list" style="overflow-y: auto; flex-grow: 1;"></div>
+      <div id="friends-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
     </div>
 
     <!-- Main Chat Window -->
     <div id="main-chat">
       <div class="chat-topbar">
         <div>
-          <h3 id="chat-header" style="margin: 0;">Select a conversation</h3>
-          <small id="chat-subtitle" style="color: #6c757d;"></small>
+          <div class="chat-title" id="chat-header">Select a conversation</div>
+          <div class="chat-subtitle" id="chat-subtitle"></div>
         </div>
         <div id="group-members-bar" class="members-container hidden"></div>
       </div>
 
       <div id="chat-box"></div>
 
-      <div class="row">
-        <input type="text" id="message-input" placeholder="Type a message..." style="flex-grow: 1;" disabled />
-        <button id="send-btn" onclick="sendMessage()" disabled>Send</button>
+      <div class="chat-input-bar">
+        <input type="text" id="message-input" class="input-field" placeholder="Type a message..." style="flex-grow: 1;" disabled />
+        <button id="send-btn" class="btn" onclick="sendMessage()" disabled>Send</button>
       </div>
     </div>
   </div>
@@ -61,13 +75,13 @@
   <!-- Create Group Modal -->
   <div id="modal" class="hidden">
     <div id="modal-content">
-      <h3 style="margin-top: 0;">Create New Group</h3>
-      <input type="text" id="group-name-input" placeholder="Group Name" style="width: 100%; margin-bottom: 12px;" />
-      <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">Add Friends:</div>
-      <div id="group-friends-checklist" style="max-height: 120px; overflow-y: auto; margin-bottom: 14px;"></div>
-      <div class="row" style="justify-content: flex-end;">
-        <button onclick="closeGroupModal()">Cancel</button>
-        <button onclick="createGroup()" style="background: #0d6efd; color: #fff; border-color: #0d6efd;">Create</button>
+      <h3>Create New Group</h3>
+      <input type="text" id="group-name-input" class="input-field" placeholder="Group Name (e.g., Project Core)" style="width: 100%; margin-bottom: 12px;" />
+      <div style="font-size: 13px; color: var(--text-muted); font-weight: 600;">Add Friends to Group:</div>
+      <div id="group-friends-checklist" class="modal-checklist"></div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-secondary" onclick="closeGroupModal()">Cancel</button>
+        <button class="btn" onclick="createGroup()">Create</button>
       </div>
     </div>
   </div>
@@ -92,6 +106,7 @@
         document.getElementById("login-panel").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
         document.getElementById("current-user-label").textContent = currentUser;
+        document.getElementById("current-user-avatar").textContent = currentUser.charAt(0);
       };
 
       socket.onmessage = (event) => {
@@ -123,29 +138,29 @@
     function renderDashboard() {
       // Pending Requests
       const reqList = document.getElementById("requests-list");
-      reqList.innerHTML = currentRequests.length ? "" : "<small style='color:#888'>None</small>";
+      reqList.innerHTML = currentRequests.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No pending requests</span>";
       currentRequests.forEach(sender => {
         const div = document.createElement("div");
-        div.style = "display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px;";
-        div.innerHTML = `<span>${sender}</span> <button onclick="acceptRequest('${sender}')">Accept</button>`;
+        div.className = "req-card";
+        div.innerHTML = `<span>${sender}</span> <button class="btn btn-sm" onclick="acceptRequest('${sender}')">Accept</button>`;
         reqList.appendChild(div);
       });
 
       // Groups List
       const gList = document.getElementById("groups-list");
-      gList.innerHTML = currentGroups.length ? "" : "<small style='color:#888'>No groups yet</small>";
+      gList.innerHTML = currentGroups.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No groups joined</span>";
       currentGroups.forEach(g => {
         const div = document.createElement("div");
         const isActive = activeChat && activeChat.type === "group" && activeChat.id === g.id;
         div.className = `list-item ${isActive ? 'active' : ''}`;
-        div.textContent = `# ${g.name}`;
+        div.innerHTML = `<span># ${g.name}</span>`;
         div.onclick = () => selectChat("group", g.id, g.name);
         gList.appendChild(div);
       });
 
       // Friends List
       const fList = document.getElementById("friends-list");
-      fList.innerHTML = currentFriends.length ? "" : "<small style='color:#888'>No friends added</small>";
+      fList.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No friends added yet</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
         const isActive = activeChat && activeChat.type === "direct" && activeChat.id === f.username;
@@ -153,7 +168,10 @@
         div.onclick = () => selectChat("direct", f.username, f.username);
         div.innerHTML = `
           <span>${f.username}</span>
-          <span class="${f.online ? 'status-online' : 'status-offline'}">${f.online ? '● Online' : '○ Offline'}</span>
+          <span class="status-indicator">
+            <span class="dot ${f.online ? 'online' : 'offline'}"></span>
+            ${f.online ? 'Online' : 'Offline'}
+          </span>
         `;
         fList.appendChild(div);
       });
@@ -161,7 +179,7 @@
 
     function selectChat(type, id, name) {
       activeChat = { type, id, name };
-      document.getElementById("chat-header").textContent = type === "group" ? `# ${name}` : `Chat with ${name}`;
+      document.getElementById("chat-header").textContent = type === "group" ? `# ${name}` : `@ ${name}`;
       document.getElementById("message-input").disabled = false;
       document.getElementById("send-btn").disabled = false;
       
@@ -181,13 +199,13 @@
       bar.classList.remove("hidden");
 
       const onlineCount = members.filter(m => m.online).length;
-      subtitle.textContent = `${members.length} members (${onlineCount} online)`;
+      subtitle.textContent = `${members.length} members • ${onlineCount} online`;
 
       members.forEach(member => {
         const chip = document.createElement("span");
         chip.className = "member-chip";
         chip.innerHTML = `
-          <span class="dot ${member.online ? 'dot-online' : 'dot-offline'}"></span>
+          <span class="dot ${member.online ? 'online' : 'offline'}"></span>
           ${member.username === currentUser ? member.username + " (you)" : member.username}
         `;
         bar.appendChild(chip);
@@ -212,10 +230,18 @@
 
     function appendMessage(sender, text) {
       const box = document.getElementById("chat-box");
-      const div = document.createElement("div");
-      div.className = `msg ${sender === currentUser ? 'me' : 'them'}`;
-      div.innerHTML = `<span class="msg-sender">${sender}</span>${text}`;
-      box.appendChild(div);
+      const isMe = sender === currentUser;
+      
+      const wrapper = document.createElement("div");
+      wrapper.className = `msg-wrapper ${isMe ? 'me' : 'them'}`;
+      
+      const senderLabel = !isMe ? `<span class="msg-sender">${sender}</span>` : '';
+      wrapper.innerHTML = `
+        ${senderLabel}
+        <div class="msg-bubble">${text}</div>
+      `;
+      
+      box.appendChild(wrapper);
       box.scrollTop = box.scrollHeight;
     }
 
@@ -247,10 +273,9 @@
 
     function openGroupModal() {
       const checklist = document.getElementById("group-friends-checklist");
-      checklist.innerHTML = currentFriends.length ? "" : "<small style='color:#888'>Add friends first</small>";
+      checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No friends to add</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
-        div.style.marginBottom = "4px";
         div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.username}</label>`;
         checklist.appendChild(div);
       });
@@ -279,6 +304,10 @@
       }));
       closeGroupModal();
     }
+
+    document.getElementById("username-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") login();
+    });
 
     document.getElementById("message-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendMessage();
