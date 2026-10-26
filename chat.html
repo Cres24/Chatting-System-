@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Workspace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="chat-view">
+    <!-- Sidebar -->
+    <div id="sidebar">
+      <div class="user-profile-header">
+        <div class="user-avatar" id="current-user-avatar">?</div>
+        <div class="user-meta">
+          <span class="name" id="current-user-fullname"></span>
+          <span style="font-size: 11px; color: var(--text-muted);" id="current-user-username"></span>
+          <span class="tag"><span class="dot online"></span> Connected</span>
+        </div>
+        <button class="btn btn-secondary btn-icon" title="Log Out" onclick="logout()">✕</button>
+      </div>
+
+      <!-- Add Friend -->
+      <div class="section-title">Add Friend</div>
+      <div style="display: flex; gap: 6px;">
+        <input type="text" id="target-username" class="input-field" placeholder="Friend's username" style="flex-grow: 1; font-size: 13px; padding: 7px 10px;" />
+        <button class="btn btn-secondary btn-sm" onclick="sendFriendRequest()">Add</button>
+      </div>
+
+      <!-- Friend Requests -->
+      <div class="section-title">Friend Requests</div>
+      <div id="requests-list" class="sidebar-scrollable" style="max-height: 85px;"></div>
+
+      <!-- Groups -->
+      <div class="section-title">
+        <span>Groups</span>
+        <button class="btn btn-secondary btn-sm" onclick="openGroupModal()">+ New</button>
+      </div>
+      <div id="groups-list" class="sidebar-scrollable" style="max-height: 130px;"></div>
+
+      <!-- Direct Messages -->
+      <div class="section-title">Direct Messages</div>
+      <div id="friends-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
+    </div>
+
+    <!-- Main Chat Window -->
+    <div id="main-chat">
+      <div class="chat-topbar">
+        <div>
+          <div class="chat-title" id="chat-header">Select a conversation</div>
+          <div class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left to start</div>
+        </div>
+        <div id="group-members-bar" class="members-container hidden"></div>
+      </div>
+
+      <div id="chat-box"></div>
+
+      <div class="chat-input-bar">
+        <input type="text" id="message-input" class="input-field" placeholder="Type a message..." style="flex-grow: 1;" disabled />
+        <button id="send-btn" class="btn btn-primary" onclick="sendMessage()" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Group Modal -->
+  <div id="modal" class="hidden">
+    <div id="modal-content">
+      <h3 style="margin-bottom: 6px;">Create New Group</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Assemble a room with your friends</p>
+      <input type="text" id="group-name-input" class="input-field" placeholder="Group Name (e.g., Core Team)" style="width: 100%; margin-bottom: 14px;" />
+      <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Select Members:</div>
+      <div id="group-friends-checklist" class="modal-checklist"></div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-secondary" onclick="closeGroupModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createGroup()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 1. Session Guard Check
+    const sessionData = sessionStorage.getItem("chat_user");
+    if (!sessionData) {
+      window.location.href = "login.html";
+    }
+    const user = JSON.parse(sessionData || "{}");
+
+    let socket = null;
+    let currentUser = user.username;
+    let activeChat = null; // { type: 'direct' | 'group', id: string | number, name: string }
+    let currentFriends = [];
+    let currentRequests = [];
+    let currentGroups = [];
+
+    // 2. Populate User Profile Header
+    document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
+    document.getElementById("current-user-username").textContent = `@${currentUser}`;
+    document.getElementById("current-user-avatar").textContent = (user.full_name || currentUser).charAt(0).toUpperCase();
+
+    // 3. WebSocket Initialization
+    function initWebSocket() {
+      socket = new WebSocket("ws://127.0.0.1:8765");
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ action: "resume_session", username: currentUser }));
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.action === "dashboard_sync") {
+          currentFriends = data.friends;
+          currentRequests = data.requests;
+          currentGroups = data.groups;
+          renderDashboard();
+        } else if (data.action === "alert") {
+          alert(data.text);
+        } else if (data.action === "chat_history") {
+          renderChatHistory(data.history);
+          if (data.chat_type === "group") {
+            renderGroupMembers(data.members || []);
+          } else {
+            document.getElementById("group-members-bar").classList.add("hidden");
+            document.getElementById("chat-subtitle").textContent = "Direct Conversation";
+          }
+        } else if (data.action === "new_message") {
+          handleIncomingMessage(data);
+        }
+      };
+
+      socket.onclose = () => {
+        console.warn("WebSocket disconnected from server.");
+      };
+    }
+
+    window.addEventListener("DOMContentLoaded", initWebSocket);
+
+    function logout() {
+      sessionStorage.removeItem("chat_user");
+      window.location.href = "login.html";
+    }
+
+    // 4. Sidebar Rendering
+    function renderDashboard() {
+      // Pending Friend Requests
+      const reqList = document.getElementById("requests-list");
+      reqList.innerHTML = currentRequests.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No pending requests</span>";
+      currentRequests.forEach(sender => {
+        const div = document.createElement("div");
+        div.className = "req-card";
+        div.innerHTML = `<span>${sender}</span> <button class="btn btn-sm btn-primary" onclick="acceptRequest('${sender}')">Accept</button>`;
+        reqList.appendChild(div);
+      });
+
+      // Groups
+      const gList = document.getElementById("groups-list");
+      gList.innerHTML = currentGroups.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No groups joined</span>";
+      currentGroups.forEach(g => {
+        const div = document.createElement("div");
+        const isActive = activeChat && activeChat.type === "group" && activeChat.id === g.id;
+        div.className = `list-item ${isActive ? 'active' : ''}`;
+        div.innerHTML = `<span># ${g.name}</span>`;
+        div.onclick = () => selectChat("group", g.id, g.name);
+        gList.appendChild(div);
+      });
+
+      // Friends List
+      const fList = document.getElementById("friends-list");
+      fList.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No friends added yet</span>";
+      currentFriends.forEach(f => {
+        const div = document.createElement("div");
+        const isActive = activeChat && activeChat.type === "direct" && activeChat.id === f.username;
+        div.className = `list-item ${isActive ? 'active' : ''}`;
+        div.onclick = () => selectChat("direct", f.username, f.full_name || f.username);
+        div.innerHTML = `
+          <div>
+            <div>${f.full_name || f.username}</div>
+            <div style="font-size:11px; color:var(--text-muted)">@${f.username}</div>
+          </div>
+          <span class="status-indicator">
+            <span class="dot ${f.online ? 'online' : 'offline'}"></span>
+            ${f.online ? 'Online' : 'Offline'}
+          </span>
+        `;
+        fList.appendChild(div);
+      });
+    }
+
+    // 5. Chat Interaction
+    function selectChat(type, id, name) {
+      activeChat = { type, id, name };
+      document.getElementById("chat-header").textContent = type === "group" ? `# ${name}` : `${name}`;
+      document.getElementById("message-input").disabled = false;
+      document.getElementById("send-btn").disabled = false;
+
+      renderDashboard();
+
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          action: "load_chat",
+          chat_type: type,
+          target_id: id
+        }));
+      }
+    }
+
+    function renderGroupMembers(members) {
+      const bar = document.getElementById("group-members-bar");
+      const subtitle = document.getElementById("chat-subtitle");
+      bar.innerHTML = "";
+      bar.classList.remove("hidden");
+
+      const onlineCount = members.filter(m => m.online).length;
+      subtitle.textContent = `${members.length} members • ${onlineCount} online`;
+
+      members.forEach(member => {
+        const chip = document.createElement("span");
+        chip.className = "member-chip";
+        chip.innerHTML = `
+          <span class="dot ${member.online ? 'online' : 'offline'}"></span>
+          ${member.username === currentUser ? member.username + " (you)" : member.username}
+        `;
+        bar.appendChild(chip);
+      });
+    }
+
+    function renderChatHistory(messages) {
+      const box = document.getElementById("chat-box");
+      box.innerHTML = "";
+      messages.forEach(m => appendMessage(m.sender, m.text));
+    }
+
+    function handleIncomingMessage(msg) {
+      if (!activeChat) return;
+      const isCurrentDirect = activeChat.type === "direct" && msg.chat_type === "direct" && activeChat.id === msg.target_id;
+      const isCurrentGroup = activeChat.type === "group" && msg.chat_type === "group" && activeChat.id === msg.target_id;
+
+      if (isCurrentDirect || isCurrentGroup) {
+        appendMessage(msg.sender, msg.text);
+      }
+    }
+
+    function appendMessage(sender, text) {
+      const box = document.getElementById("chat-box");
+      const isMe = sender === currentUser;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = `msg-wrapper ${isMe ? 'me' : 'them'}`;
+
+      const senderLabel = !isMe ? `<span class="msg-sender">${sender}</span>` : '';
+      wrapper.innerHTML = `
+        ${senderLabel}
+        <div class="msg-bubble">${text}</div>
+      `;
+
+      box.appendChild(wrapper);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function sendMessage() {
+      const input = document.getElementById("message-input");
+      const text = input.value.trim();
+      if (text && activeChat && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          action: "send_message",
+          chat_type: activeChat.type,
+          target_id: activeChat.id,
+          text: text
+        }));
+        input.value = "";
+      }
+    }
+
+    // 6. Friends & Groups Actions
+    function sendFriendRequest() {
+      const target = document.getElementById("target-username").value.trim();
+      if (target && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ action: "send_friend_request", to_user: target }));
+        document.getElementById("target-username").value = "";
+      }
+    }
+
+    function acceptRequest(fromUser) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ action: "accept_friend_request", from_user: fromUser }));
+      }
+    }
+
+    function openGroupModal() {
+      const checklist = document.getElementById("group-friends-checklist");
+      checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>Add friends first</span>";
+      currentFriends.forEach(f => {
+        const div = document.createElement("div");
+        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.full_name || f.username} (@${f.username})</label>`;
+        checklist.appendChild(div);
+      });
+      document.getElementById("modal").classList.remove("hidden");
+    }
+
+    function closeGroupModal() {
+      document.getElementById("modal").classList.add("hidden");
+      document.getElementById("group-name-input").value = "";
+    }
+
+    function createGroup() {
+      const name = document.getElementById("group-name-input").value.trim();
+      const checkboxes = document.querySelectorAll("#group-friends-checklist input[type='checkbox']:checked");
+      const selected = Array.from(checkboxes).map(cb => cb.value);
+
+      if (!name) {
+        alert("Please enter a group name.");
+        return;
+      }
+
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          action: "create_group",
+          name: name,
+          members: selected
+        }));
+      }
+      closeGroupModal();
+    }
+
+    // Enter Key Bindings
+    document.getElementById("message-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+
+    document.getElementById("target-username").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendFriendRequest();
+    });
+  </script>
+</body>
+</html>

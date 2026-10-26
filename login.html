@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log In - Real-Time Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="brand-badge">💬</div>
+      <h2>Welcome Back</h2>
+      <p>Log in using your username or email address</p>
+    </div>
+
+    <div class="auth-fields">
+      <div class="field-group">
+        <label>Account</label>
+        <input type="text" id="login-id" class="input-field" placeholder="Username or Email" autofocus />
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input type="password" id="login-password" class="input-field" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-primary" onclick="submitLogin()">Log In</button>
+    </div>
+
+    <div id="feedback" class="auth-feedback hidden"></div>
+
+    <div class="auth-footer">
+      Don't have an account? <a href="register.html">Create one</a>
+    </div>
+  </div>
+
+  <script>
+    let socket = new WebSocket("ws://127.0.0.1:8765");
+
+    function showFeedback(msg, isError) {
+      const fb = document.getElementById("feedback");
+      fb.textContent = msg;
+      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      fb.classList.remove("hidden");
+    }
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.action === "auth_error") {
+        showFeedback(data.text, true);
+      } else if (data.action === "login_success") {
+        // Store user credentials in session storage for chat.html
+        sessionStorage.setItem("chat_user", JSON.stringify(data.user));
+        window.location.href = "chat.html";
+      }
+    };
+
+    socket.onclose = () => {
+      showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+    };
+
+    function submitLogin() {
+      const identifier = document.getElementById("login-id").value.trim();
+      const password = document.getElementById("login-password").value;
+      if (!identifier || !password) {
+        showFeedback("Please fill in both fields.", true);
+        return;
+      }
+      socket.send(JSON.stringify({ action: "login", identifier, password }));
+    }
+
+    document.getElementById("login-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitLogin();
+    });
+  </script>
+  <script>
+    let socket = null;
+
+    function connect() {
+      socket = new WebSocket("ws://127.0.0.1:8765");
+
+      socket.onopen = () => {
+        console.log("Connected to server");
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.action === "auth_error") {
+          showFeedback(data.text, true);
+        } else if (data.action === "login_success") {
+          sessionStorage.setItem("chat_user", JSON.stringify(data.user));
+          window.location.href = "chat.html";
+        }
+      };
+
+      socket.onclose = () => {
+        showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+      };
+    }
+
+    function showFeedback(msg, isError) {
+      const fb = document.getElementById("feedback");
+      fb.textContent = msg;
+      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      fb.classList.remove("hidden");
+    }
+
+    function submitLogin() {
+      const identifier = document.getElementById("login-id").value.trim();
+      const password = document.getElementById("login-password").value;
+
+      if (!identifier || !password) {
+        showFeedback("Please fill in both fields.", true);
+        return;
+      }
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showFeedback("Connecting to server, please wait...", true);
+        return;
+      }
+
+      socket.send(JSON.stringify({ action: "login", identifier, password }));
+    }
+
+    document.getElementById("login-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitLogin();
+    });
+
+    // Start connection on page load
+    connect();
+  </script>
+</body>
+</html>
+</body>
+</html>

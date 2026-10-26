@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign Up - Real-Time Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="brand-badge">✨</div>
+      <h2>Create Account</h2>
+      <p>Fill in your details to start chatting</p>
+    </div>
+
+    <div class="auth-fields">
+      <div class="field-group">
+        <label>Full Name</label>
+        <input type="text" id="reg-fullname" class="input-field" placeholder="John Doe" autofocus />
+      </div>
+      <div class="field-group">
+        <label>Username</label>
+        <input type="text" id="reg-username" class="input-field" placeholder="johndoe" />
+      </div>
+      <div class="field-group">
+        <label>Email Address</label>
+        <input type="email" id="reg-email" class="input-field" placeholder="john@example.com" />
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input type="password" id="reg-password" class="input-field" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-primary" onclick="submitRegister()">Sign Up</button>
+    </div>
+
+    <div id="feedback" class="auth-feedback hidden"></div>
+
+    <div class="auth-footer">
+      Already have an account? <a href="login.html">Log in</a>
+    </div>
+  </div>
+
+  <script>
+    let socket = null;
+
+    function showFeedback(msg, isError) {
+      const fb = document.getElementById("feedback");
+      fb.textContent = msg;
+      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      fb.classList.remove("hidden");
+    }
+
+    function initSocket() {
+      // Connect to 127.0.0.1 explicitly
+      socket = new WebSocket("ws://127.0.0.1:8765");
+
+      socket.onopen = () => {
+        console.log("WebSocket connected successfully.");
+        const fb = document.getElementById("feedback");
+        if (fb.classList.contains("error")) {
+          fb.classList.add("hidden");
+        }
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.action === "auth_error") {
+          showFeedback(data.text, true);
+        } else if (data.action === "register_success") {
+          showFeedback(data.text + " Redirecting to login...", false);
+          setTimeout(() => {
+            window.location.href = "login.html";
+          }, 1200);
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error("Socket error encountered:", err);
+      };
+
+      socket.onclose = () => {
+        showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+      };
+    }
+
+    function submitRegister() {
+      const full_name = document.getElementById("reg-fullname").value.trim();
+      const username = document.getElementById("reg-username").value.trim();
+      const email = document.getElementById("reg-email").value.trim();
+      const password = document.getElementById("reg-password").value;
+
+      if (!full_name || !username || !email || !password) {
+        showFeedback("All fields are required.", true);
+        return;
+      }
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showFeedback("Connecting to server, please try again in a second...", true);
+        initSocket();
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        action: "register",
+        full_name: full_name,
+        username: username,
+        email: email,
+        password: password
+      }));
+    }
+
+    document.getElementById("reg-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitRegister();
+    });
+
+    window.addEventListener("DOMContentLoaded", initSocket);
+  </script>
+</body>
+</html>
