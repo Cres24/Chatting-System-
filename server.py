@@ -7,9 +7,9 @@ from websockets.asyncio.server import serve
 logging.basicConfig(level=logging.INFO)
 
 DB_FILE = "chat.db"
-ONLINE_USERS = {}  # username -> websocket
+ONLINE_USERS = {}  # username -> websocket connection
 
-# ----------------- DATABASE SETUP & QUERIES -----------------
+# ----------------- DATABASE INITIALIZATION & QUERIES -----------------
 
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
@@ -44,7 +44,6 @@ def init_db():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Group tables
         c.execute("""
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,8 +121,6 @@ def accept_request(from_user: str, to_user: str):
         c.execute("DELETE FROM friend_requests WHERE from_user = ? AND to_user = ?", (from_user, to_user))
         conn.commit()
 
-# --- Group Helpers ---
-
 def create_group(name: str, creator: str, members: list[str]) -> int:
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -145,11 +142,12 @@ def get_user_groups(username: str):
         """, (username,))
         return [{"id": row[0], "name": row[1]} for row in c.fetchall()]
 
-def get_group_members(group_id: int):
+def get_group_members_with_status(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT username FROM group_members WHERE group_id = ?", (group_id,))
-        return [row[0] for row in c.fetchall()]
+        members = [row[0] for row in c.fetchall()]
+        return [{"username": m, "online": m in ONLINE_USERS} for m in members]
 
 def save_direct_message(sender: str, receiver: str, text: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -183,11 +181,14 @@ def get_group_history(group_id: int):
         """, (group_id,))
         return [{"sender": row[0], "text": row[1]} for row in c.fetchall()]
 
-# ----------------- BROADCAST & SYNC -----------------
+# ----------------- NOTIFICATION & SYNC HELPERS -----------------
 
 async def send_json(ws, data: dict):
     if ws:
-        await ws.send(json.dumps(data))
+        try:
+            await ws.send(json.dumps(data))
+        except Exception:
+            pass
 
 async def sync_user_dashboard(username: str):
     ws = ONLINE_USERS.get(username)
@@ -205,7 +206,7 @@ async def sync_user_dashboard(username: str):
         "groups": groups
     })
 
-# ----------------- WEBSOCKET HANDLER -----------------
+# ----------------- CLIENT HANDLER -----------------
 
 async def handle_client(websocket):
     current_user = None
@@ -223,6 +224,7 @@ async def handle_client(websocket):
                 logging.info(f"{current_user} connected.")
                 await sync_user_dashboard(current_user)
 
+                # Update online status for all confirmed friends
                 for friend in get_friends(current_user):
                     if friend in ONLINE_USERS:
                         await sync_user_dashboard(friend)
@@ -249,25 +251,29 @@ async def handle_client(websocket):
                     continue
 
                 group_id = create_group(name, current_user, members)
-                # Refresh dashboards for all online group members
-                for member in get_group_members(group_id):
+                group_members_list = [m["username"] for m in get_group_members_with_status(group_id)]
+                for member in group_members_list:
                     if member in ONLINE_USERS:
                         await sync_user_dashboard(member)
 
             elif action == "load_chat":
-                chat_type = data.get("chat_type")  # "direct" or "group"
+                chat_type = data.get("chat_type")
                 target_id = data.get("target_id")
+                members = []
 
                 if chat_type == "direct":
                     history = get_direct_history(current_user, target_id)
                 else:
-                    history = get_group_history(int(target_id))
+                    group_id = int(target_id)
+                    history = get_group_history(group_id)
+                    members = get_group_members_with_status(group_id)
 
                 await send_json(websocket, {
                     "action": "chat_history",
                     "chat_type": chat_type,
                     "target_id": target_id,
-                    "history": history
+                    "history": history,
+                    "members": members
                 })
 
             elif action == "send_message":
@@ -292,8 +298,10 @@ async def handle_client(websocket):
 
                 elif chat_type == "group":
                     group_id = int(target_id)
-                    members = get_group_members(group_id)
-                    if current_user not in members:
+                    member_data = get_group_members_with_status(group_id)
+                    member_names = [m["username"] for m in member_data]
+
+                    if current_user not in member_names:
                         continue
 
                     save_group_message(group_id, current_user, text)
@@ -304,9 +312,9 @@ async def handle_client(websocket):
                         "sender": current_user,
                         "text": text
                     }
-                    for member in members:
-                        if member in ONLINE_USERS:
-                            await send_json(ONLINE_USERS[member], payload)
+                    for name in member_names:
+                        if name in ONLINE_USERS:
+                            await send_json(ONLINE_USERS[name], payload)
 
     except Exception as e:
         logging.warning(f"Connection error: {e}")
@@ -318,10 +326,12 @@ async def handle_client(websocket):
                 if friend in ONLINE_USERS:
                     asyncio.create_task(sync_user_dashboard(friend))
 
+# ----------------- MAIN RUNNER -----------------
+
 async def main():
     init_db()
     async with serve(handle_client, "127.0.0.1", 8765):
-        logging.info("WebSocket Chat & Groups server running on ws://127.0.0.1:8765")
+        logging.info("WebSocket chat server running on ws://127.0.0.1:8765")
         await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":

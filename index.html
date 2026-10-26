@@ -2,34 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Real-Time Chat & Groups</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px auto; max-width: 960px; }
-    .hidden { display: none !important; }
-    #app { display: flex; height: 600px; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
-    #sidebar { width: 320px; border-right: 1px solid #ccc; padding: 12px; display: flex; flex-direction: column; background: #f8f9fa; }
-    #main-chat { flex-grow: 1; display: flex; flex-direction: column; padding: 12px; background: #fff; }
-    #chat-box { flex-grow: 1; border: 1px solid #ddd; border-radius: 4px; padding: 10px; overflow-y: auto; background: #fafafa; margin-bottom: 10px; }
-    .list-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; margin-bottom: 4px; }
-    .list-item:hover { background: #e9ecef; }
-    .list-item.active { background: #cfe2ff; font-weight: bold; }
-    .status-online { color: green; font-size: 12px; }
-    .status-offline { color: #888; font-size: 12px; }
-    .section-title { font-weight: bold; font-size: 12px; margin: 12px 0 6px 0; color: #6c757d; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
-    .msg { margin: 6px 0; line-height: 1.4; }
-    .msg.me { text-align: right; color: #0d6efd; }
-    .msg.them { text-align: left; color: #212529; }
-    .msg-sender { font-weight: bold; font-size: 12px; display: block; color: #495057; }
-    .row { display: flex; gap: 6px; }
-    input[type="text"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-    button { padding: 6px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #adb5bd; background: #e9ecef; }
-    button:hover { background: #dee2e6; }
-    
-    /* Group Modal */
-    #modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; }
-    #modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 340px; }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
@@ -66,8 +41,16 @@
 
     <!-- Main Chat Window -->
     <div id="main-chat">
-      <h3 id="chat-header" style="margin-top: 0;">Select a conversation</h3>
+      <div class="chat-topbar">
+        <div>
+          <h3 id="chat-header" style="margin: 0;">Select a conversation</h3>
+          <small id="chat-subtitle" style="color: #6c757d;"></small>
+        </div>
+        <div id="group-members-bar" class="members-container hidden"></div>
+      </div>
+
       <div id="chat-box"></div>
+
       <div class="row">
         <input type="text" id="message-input" placeholder="Type a message..." style="flex-grow: 1;" disabled />
         <button id="send-btn" onclick="sendMessage()" disabled>Send</button>
@@ -78,7 +61,7 @@
   <!-- Create Group Modal -->
   <div id="modal" class="hidden">
     <div id="modal-content">
-      <h3>Create New Group</h3>
+      <h3 style="margin-top: 0;">Create New Group</h3>
       <input type="text" id="group-name-input" placeholder="Group Name" style="width: 100%; margin-bottom: 12px;" />
       <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">Add Friends:</div>
       <div id="group-friends-checklist" style="max-height: 120px; overflow-y: auto; margin-bottom: 14px;"></div>
@@ -94,6 +77,8 @@
     let currentUser = "";
     let activeChat = null; // { type: 'direct' | 'group', id: string | number, name: string }
     let currentFriends = [];
+    let currentRequests = [];
+    let currentGroups = [];
 
     function login() {
       const input = document.getElementById("username-input");
@@ -114,11 +99,19 @@
 
         if (data.action === "dashboard_sync") {
           currentFriends = data.friends;
-          renderDashboard(data.friends, data.requests, data.groups);
+          currentRequests = data.requests;
+          currentGroups = data.groups;
+          renderDashboard();
         } else if (data.action === "alert") {
           alert(data.text);
         } else if (data.action === "chat_history") {
           renderChatHistory(data.history);
+          if (data.chat_type === "group") {
+            renderGroupMembers(data.members || []);
+          } else {
+            document.getElementById("group-members-bar").classList.add("hidden");
+            document.getElementById("chat-subtitle").textContent = "";
+          }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
         }
@@ -127,11 +120,11 @@
       socket.onclose = () => alert("Disconnected from server.");
     }
 
-    function renderDashboard(friends, requests, groups) {
+    function renderDashboard() {
       // Pending Requests
       const reqList = document.getElementById("requests-list");
-      reqList.innerHTML = requests.length ? "" : "<small style='color:#888'>None</small>";
-      requests.forEach(sender => {
+      reqList.innerHTML = currentRequests.length ? "" : "<small style='color:#888'>None</small>";
+      currentRequests.forEach(sender => {
         const div = document.createElement("div");
         div.style = "display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px;";
         div.innerHTML = `<span>${sender}</span> <button onclick="acceptRequest('${sender}')">Accept</button>`;
@@ -140,8 +133,8 @@
 
       // Groups List
       const gList = document.getElementById("groups-list");
-      gList.innerHTML = groups.length ? "" : "<small style='color:#888'>No groups yet</small>";
-      groups.forEach(g => {
+      gList.innerHTML = currentGroups.length ? "" : "<small style='color:#888'>No groups yet</small>";
+      currentGroups.forEach(g => {
         const div = document.createElement("div");
         const isActive = activeChat && activeChat.type === "group" && activeChat.id === g.id;
         div.className = `list-item ${isActive ? 'active' : ''}`;
@@ -152,8 +145,8 @@
 
       // Friends List
       const fList = document.getElementById("friends-list");
-      fList.innerHTML = friends.length ? "" : "<small style='color:#888'>No friends added</small>";
-      friends.forEach(f => {
+      fList.innerHTML = currentFriends.length ? "" : "<small style='color:#888'>No friends added</small>";
+      currentFriends.forEach(f => {
         const div = document.createElement("div");
         const isActive = activeChat && activeChat.type === "direct" && activeChat.id === f.username;
         div.className = `list-item ${isActive ? 'active' : ''}`;
@@ -172,14 +165,33 @@
       document.getElementById("message-input").disabled = false;
       document.getElementById("send-btn").disabled = false;
       
-      // Refresh sidebar highlighting
-      renderDashboard(currentFriends, [], []); 
+      renderDashboard();
 
       socket.send(JSON.stringify({
         action: "load_chat",
         chat_type: type,
         target_id: id
       }));
+    }
+
+    function renderGroupMembers(members) {
+      const bar = document.getElementById("group-members-bar");
+      const subtitle = document.getElementById("chat-subtitle");
+      bar.innerHTML = "";
+      bar.classList.remove("hidden");
+
+      const onlineCount = members.filter(m => m.online).length;
+      subtitle.textContent = `${members.length} members (${onlineCount} online)`;
+
+      members.forEach(member => {
+        const chip = document.createElement("span");
+        chip.className = "member-chip";
+        chip.innerHTML = `
+          <span class="dot ${member.online ? 'dot-online' : 'dot-offline'}"></span>
+          ${member.username === currentUser ? member.username + " (you)" : member.username}
+        `;
+        bar.appendChild(chip);
+      });
     }
 
     function renderChatHistory(messages) {
@@ -233,12 +245,12 @@
       socket.send(JSON.stringify({ action: "accept_friend_request", from_user: fromUser }));
     }
 
-    // Modal Operations
     function openGroupModal() {
       const checklist = document.getElementById("group-friends-checklist");
-      checklist.innerHTML = "";
+      checklist.innerHTML = currentFriends.length ? "" : "<small style='color:#888'>Add friends first</small>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
+        div.style.marginBottom = "4px";
         div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.username}</label>`;
         checklist.appendChild(div);
       });
