@@ -2,108 +2,201 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Python WebSocket Chat</title>
+  <title>Chat with Friends</title>
   <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 30px auto; padding: 0 16px; }
-    #chat-box { border: 1px solid #ccc; height: 350px; overflow-y: auto; padding: 10px; border-radius: 6px; background: #fafafa; }
-    .msg { margin: 6px 0; }
-    .system { color: #888; font-style: italic; }
-    .user { font-weight: bold; }
-    .row { margin-top: 10px; display: flex; gap: 8px; }
-    input[type="text"] { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-    button { padding: 8px 16px; cursor: pointer; border-radius: 4px; border: 1px solid #888; background: #eee; }
-    button:hover { background: #ddd; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px auto; max-width: 900px; }
     .hidden { display: none !important; }
+    #app { display: flex; height: 550px; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
+    #sidebar { width: 300px; border-right: 1px solid #ccc; padding: 12px; display: flex; flex-direction: column; background: #f7f7f8; }
+    #main-chat { flex-grow: 1; display: flex; flex-direction: column; padding: 12px; }
+    #chat-box { flex-grow: 1; border: 1px solid #ddd; border-radius: 4px; padding: 10px; overflow-y: auto; background: #fff; margin-bottom: 10px; }
+    .friend-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .friend-item:hover { background: #e8e8ed; }
+    .friend-item.active { background: #d0d7de; font-weight: bold; }
+    .status-online { color: green; font-size: 12px; }
+    .status-offline { color: #888; font-size: 12px; }
+    .section-title { font-weight: bold; font-size: 13px; margin: 12px 0 6px 0; color: #555; text-transform: uppercase; }
+    .request-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 14px; }
+    .msg { margin: 6px 0; }
+    .msg.me { text-align: right; color: #0066cc; }
+    .msg.them { text-align: left; color: #333; }
+    .row { display: flex; gap: 6px; }
+    input[type="text"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #aaa; background: #eee; }
+    button:hover { background: #ddd; }
   </style>
 </head>
 <body>
-  <h2>Real-Time Chat</h2>
 
   <!-- Login Section -->
-  <div id="login-section" class="row">
-    <input type="text" id="username-input" placeholder="Enter your display name..." />
-    <button id="join-btn">Join Chat</button>
+  <div id="login-panel" style="margin-bottom: 20px;">
+    <input type="text" id="username-input" placeholder="Enter username..." />
+    <button onclick="login()">Log In</button>
   </div>
 
-  <!-- Chat Section (Shown after joining) -->
-  <div id="chat-section" class="hidden">
-    <div id="chat-box"></div>
-    <div class="row">
-      <input type="text" id="message-input" placeholder="Type a message..." />
-      <button id="send-btn">Send</button>
+  <!-- Main App Layout -->
+  <div id="app" class="hidden">
+    <!-- Sidebar -->
+    <div id="sidebar">
+      <div>
+        <strong>Signed in as: <span id="current-user-label"></span></strong>
+      </div>
+      
+      <div class="section-title">Add Friend</div>
+      <div class="row">
+        <input type="text" id="target-username" placeholder="Username" style="width: 100%;" />
+        <button onclick="sendFriendRequest()">Add</button>
+      </div>
+
+      <div class="section-title">Friend Requests</div>
+      <div id="requests-list"></div>
+
+      <div class="section-title">Friends</div>
+      <div id="friends-list" style="overflow-y: auto; flex-grow: 1;"></div>
+    </div>
+
+    <!-- Main Chat Window -->
+    <div id="main-chat">
+      <h3 id="chat-header" style="margin-top: 0;">Select a friend to start chatting</h3>
+      <div id="chat-box"></div>
+      <div class="row">
+        <input type="text" id="message-input" placeholder="Type a message..." style="flex-grow: 1;" disabled />
+        <button id="send-btn" onclick="sendMessage()" disabled>Send</button>
+      </div>
     </div>
   </div>
 
   <script>
     let socket = null;
-    let username = "";
+    let currentUser = "";
+    let activeFriend = "";
 
-    const loginSection = document.getElementById("login-section");
-    const chatSection = document.getElementById("chat-section");
-    const usernameInput = document.getElementById("username-input");
-    const joinBtn = document.getElementById("join-btn");
-    const chatBox = document.getElementById("chat-box");
-    const messageInput = document.getElementById("message-input");
-    const sendBtn = document.getElementById("send-btn");
-
-    function appendMessage(text, className = "") {
-      const el = document.createElement("div");
-      el.className = `msg ${className}`;
-      el.textContent = text;
-      chatBox.appendChild(el);
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function connect() {
-      username = usernameInput.value.trim() || "Guest";
-
-      // Hide login, reveal chat room
-      loginSection.classList.add("hidden");
-      chatSection.classList.remove("hidden");
+    function login() {
+      const input = document.getElementById("username-input");
+      currentUser = input.value.trim();
+      if (!currentUser) return;
 
       socket = new WebSocket("ws://127.0.0.1:8765");
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ username }));
-        messageInput.focus();
+        socket.send(JSON.stringify({ action: "login", username: currentUser }));
+        document.getElementById("login-panel").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+        document.getElementById("current-user-label").textContent = currentUser;
       };
 
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === "system") {
-          appendMessage(data.text, "system");
-        } else if (data.type === "chat") {
-          appendMessage(`${data.username}: ${data.text}`);
+
+        if (data.action === "dashboard_sync") {
+          renderDashboard(data.friends, data.requests);
+        } else if (data.action === "alert") {
+          alert(data.text);
+        } else if (data.action === "chat_history") {
+          renderChatHistory(data.history);
+        } else if (data.action === "new_direct_message") {
+          handleIncomingMessage(data);
         }
       };
 
       socket.onclose = () => {
-        appendMessage("Disconnected from server. Check if server.py is running.", "system");
-        messageInput.disabled = true;
-        sendBtn.disabled = true;
-      };
-
-      socket.onerror = (err) => {
-        appendMessage("Connection error occurred.", "system");
+        alert("Disconnected from chat server.");
       };
     }
 
-    function sendMessage() {
-      const text = messageInput.value.trim();
-      if (text && socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ text }));
-        messageInput.value = "";
+    function renderDashboard(friends, requests) {
+      // Pending requests
+      const reqList = document.getElementById("requests-list");
+      reqList.innerHTML = "";
+      if (requests.length === 0) reqList.innerHTML = "<small style='color:#888'>None</small>";
+      requests.forEach(sender => {
+        const div = document.createElement("div");
+        div.className = "request-item";
+        div.innerHTML = `<span>${sender}</span> <button onclick="acceptRequest('${sender}')">Accept</button>`;
+        reqList.appendChild(div);
+      });
+
+      // Friends list
+      const fList = document.getElementById("friends-list");
+      fList.innerHTML = "";
+      friends.forEach(f => {
+        const div = document.createElement("div");
+        div.className = `friend-item ${f.username === activeFriend ? 'active' : ''}`;
+        div.onclick = () => selectFriend(f.username);
+        div.innerHTML = `
+          <span>${f.username}</span>
+          <span class="${f.online ? 'status-online' : 'status-offline'}">
+            ${f.online ? '● Online' : '○ Offline'}
+          </span>
+        `;
+        fList.appendChild(div);
+      });
+    }
+
+    function sendFriendRequest() {
+      const target = document.getElementById("target-username").value.trim();
+      if (target) {
+        socket.send(JSON.stringify({ action: "send_friend_request", to_user: target }));
+        document.getElementById("target-username").value = "";
       }
     }
 
-    joinBtn.addEventListener("click", connect);
-    usernameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") connect();
-    });
+    function acceptRequest(fromUser) {
+      socket.send(JSON.stringify({ action: "accept_friend_request", from_user: fromUser }));
+    }
 
-    sendBtn.addEventListener("click", sendMessage);
-    messageInput.addEventListener("keydown", (e) => {
+    function selectFriend(friend) {
+      activeFriend = friend;
+      document.getElementById("chat-header").textContent = `Chat with ${friend}`;
+      document.getElementById("message-input").disabled = false;
+      document.getElementById("send-btn").disabled = false;
+
+      // Request chat history
+      socket.send(JSON.stringify({ action: "load_chat", friend: activeFriend }));
+    }
+
+    function renderChatHistory(messages) {
+      const box = document.getElementById("chat-box");
+      box.innerHTML = "";
+      messages.forEach(m => {
+        appendMessage(m.sender, m.text);
+      });
+    }
+
+    function handleIncomingMessage(msg) {
+      // Display if this chat is currently open
+      if (
+        (msg.sender === activeFriend && msg.recipient === currentUser) ||
+        (msg.sender === currentUser && msg.recipient === activeFriend)
+      ) {
+        appendMessage(msg.sender, msg.text);
+      }
+    }
+
+    function appendMessage(sender, text) {
+      const box = document.getElementById("chat-box");
+      const div = document.createElement("div");
+      div.className = `msg ${sender === currentUser ? 'me' : 'them'}`;
+      div.textContent = `${sender}: ${text}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function sendMessage() {
+      const input = document.getElementById("message-input");
+      const text = input.value.trim();
+      if (text && activeFriend) {
+        socket.send(JSON.stringify({
+          action: "send_direct_message",
+          recipient: activeFriend,
+          text: text
+        }));
+        input.value = "";
+      }
+    }
+
+    document.getElementById("message-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendMessage();
     });
   </script>
