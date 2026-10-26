@@ -7,11 +7,9 @@ from websockets.asyncio.server import serve
 logging.basicConfig(level=logging.INFO)
 
 DB_FILE = "chat.db"
+ONLINE_USERS = {}  # username -> websocket
 
-# In-memory mapping: username -> websocket connection
-ONLINE_USERS = {}
-
-# ----------------- DATABASE HELPERS -----------------
+# ----------------- DATABASE SETUP & QUERIES -----------------
 
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
@@ -38,10 +36,34 @@ def init_db():
             )
         """)
         c.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE IF NOT EXISTS direct_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sender TEXT NOT NULL,
                 receiver TEXT NOT NULL,
+                text TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Group tables
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                creator TEXT NOT NULL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id INTEGER,
+                username TEXT NOT NULL,
+                PRIMARY KEY (group_id, username)
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS group_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                sender TEXT NOT NULL,
                 text TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -79,17 +101,11 @@ def add_friend_request(from_user: str, to_user: str):
         c.execute("SELECT id FROM users WHERE username = ?", (to_user,))
         if not c.fetchone():
             return False, "User does not exist."
-
-        # Check existing friendship
-        friends = get_friends(from_user)
-        if to_user in friends:
+        if to_user in get_friends(from_user):
             return False, "Already friends."
-
-        # Check if already requested
         c.execute("SELECT id FROM friend_requests WHERE from_user = ? AND to_user = ? AND status = 'pending'", (from_user, to_user))
         if c.fetchone():
             return False, "Request already sent."
-
         c.execute("INSERT INTO friend_requests (from_user, to_user) VALUES (?, ?)", (from_user, to_user))
         conn.commit()
         return True, "Request sent."
@@ -101,31 +117,73 @@ def accept_request(from_user: str, to_user: str):
         u1 = c.fetchone()[0]
         c.execute("SELECT id FROM users WHERE username = ?", (to_user,))
         u2 = c.fetchone()[0]
-
-        # Add bidirectional friendship
         c.execute("INSERT OR IGNORE INTO friends (user_id, friend_id) VALUES (?, ?)", (u1, u2))
         c.execute("INSERT OR IGNORE INTO friends (user_id, friend_id) VALUES (?, ?)", (u2, u1))
-        # Remove request
         c.execute("DELETE FROM friend_requests WHERE from_user = ? AND to_user = ?", (from_user, to_user))
         conn.commit()
 
-def save_message(sender: str, receiver: str, text: str):
+# --- Group Helpers ---
+
+def create_group(name: str, creator: str, members: list[str]) -> int:
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)", (sender, receiver, text))
+        c.execute("INSERT INTO groups (name, creator) VALUES (?, ?)", (name, creator))
+        group_id = c.lastrowid
+        all_members = set(members + [creator])
+        for member in all_members:
+            c.execute("INSERT INTO group_members (group_id, username) VALUES (?, ?)", (group_id, member))
         conn.commit()
+        return group_id
 
-def get_chat_history(user1: str, user2: str):
+def get_user_groups(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT sender, text FROM messages
+            SELECT g.id, g.name FROM groups g
+            JOIN group_members gm ON g.id = gm.group_id
+            WHERE gm.username = ?
+        """, (username,))
+        return [{"id": row[0], "name": row[1]} for row in c.fetchall()]
+
+def get_group_members(group_id: int):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT username FROM group_members WHERE group_id = ?", (group_id,))
+        return [row[0] for row in c.fetchall()]
+
+def save_direct_message(sender: str, receiver: str, text: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO direct_messages (sender, receiver, text) VALUES (?, ?, ?)", (sender, receiver, text))
+        conn.commit()
+
+def save_group_message(group_id: int, sender: str, text: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO group_messages (group_id, sender, text) VALUES (?, ?, ?)", (group_id, sender, text))
+        conn.commit()
+
+def get_direct_history(u1: str, u2: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT sender, text FROM direct_messages
             WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
             ORDER BY timestamp ASC LIMIT 50
-        """, (user1, user2, user2, user1))
+        """, (u1, u2, u2, u1))
         return [{"sender": row[0], "text": row[1]} for row in c.fetchall()]
 
-# ----------------- NOTIFICATION HELPERS -----------------
+def get_group_history(group_id: int):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT sender, text FROM group_messages
+            WHERE group_id = ?
+            ORDER BY timestamp ASC LIMIT 50
+        """, (group_id,))
+        return [{"sender": row[0], "text": row[1]} for row in c.fetchall()]
+
+# ----------------- BROADCAST & SYNC -----------------
 
 async def send_json(ws, data: dict):
     if ws:
@@ -136,14 +194,15 @@ async def sync_user_dashboard(username: str):
     if not ws:
         return
     friends = get_friends(username)
-    friends_status = [
-        {"username": f, "online": f in ONLINE_USERS} for f in friends
-    ]
+    friends_status = [{"username": f, "online": f in ONLINE_USERS} for f in friends]
     pending = get_pending_requests(username)
+    groups = get_user_groups(username)
+
     await send_json(ws, {
         "action": "dashboard_sync",
         "friends": friends_status,
-        "requests": pending
+        "requests": pending,
+        "groups": groups
     })
 
 # ----------------- WEBSOCKET HANDLER -----------------
@@ -164,7 +223,6 @@ async def handle_client(websocket):
                 logging.info(f"{current_user} connected.")
                 await sync_user_dashboard(current_user)
 
-                # Notify friends that user is online
                 for friend in get_friends(current_user):
                     if friend in ONLINE_USERS:
                         await sync_user_dashboard(friend)
@@ -183,39 +241,72 @@ async def handle_client(websocket):
                 if from_user in ONLINE_USERS:
                     await sync_user_dashboard(from_user)
 
+            elif action == "create_group":
+                name = data.get("name", "").strip()
+                members = data.get("members", [])
+                if not name:
+                    await send_json(websocket, {"action": "alert", "text": "Group name is required."})
+                    continue
+
+                group_id = create_group(name, current_user, members)
+                # Refresh dashboards for all online group members
+                for member in get_group_members(group_id):
+                    if member in ONLINE_USERS:
+                        await sync_user_dashboard(member)
+
             elif action == "load_chat":
-                friend = data.get("friend")
-                history = get_chat_history(current_user, friend)
+                chat_type = data.get("chat_type")  # "direct" or "group"
+                target_id = data.get("target_id")
+
+                if chat_type == "direct":
+                    history = get_direct_history(current_user, target_id)
+                else:
+                    history = get_group_history(int(target_id))
+
                 await send_json(websocket, {
                     "action": "chat_history",
-                    "friend": friend,
+                    "chat_type": chat_type,
+                    "target_id": target_id,
                     "history": history
                 })
 
-            elif action == "send_direct_message":
-                recipient = data.get("recipient")
+            elif action == "send_message":
+                chat_type = data.get("chat_type")
+                target_id = data.get("target_id")
                 text = data.get("text", "").strip()
-                if not text or not recipient:
+                if not text:
                     continue
 
-                # Verify they are friends before routing
-                if recipient not in get_friends(current_user):
-                    await send_json(websocket, {"action": "alert", "text": "You can only message friends."})
-                    continue
+                if chat_type == "direct":
+                    save_direct_message(current_user, target_id, text)
+                    payload = {
+                        "action": "new_message",
+                        "chat_type": "direct",
+                        "target_id": current_user,
+                        "sender": current_user,
+                        "text": text
+                    }
+                    if target_id in ONLINE_USERS:
+                        await send_json(ONLINE_USERS[target_id], payload)
+                    await send_json(websocket, {**payload, "target_id": target_id})
 
-                save_message(current_user, recipient, text)
+                elif chat_type == "group":
+                    group_id = int(target_id)
+                    members = get_group_members(group_id)
+                    if current_user not in members:
+                        continue
 
-                payload = {
-                    "action": "new_direct_message",
-                    "sender": current_user,
-                    "recipient": recipient,
-                    "text": text
-                }
-                # Send to recipient if online
-                if recipient in ONLINE_USERS:
-                    await send_json(ONLINE_USERS[recipient], payload)
-                # Echo back to sender
-                await send_json(websocket, payload)
+                    save_group_message(group_id, current_user, text)
+                    payload = {
+                        "action": "new_message",
+                        "chat_type": "group",
+                        "target_id": group_id,
+                        "sender": current_user,
+                        "text": text
+                    }
+                    for member in members:
+                        if member in ONLINE_USERS:
+                            await send_json(ONLINE_USERS[member], payload)
 
     except Exception as e:
         logging.warning(f"Connection error: {e}")
@@ -223,7 +314,6 @@ async def handle_client(websocket):
         if current_user and current_user in ONLINE_USERS:
             del ONLINE_USERS[current_user]
             logging.info(f"{current_user} disconnected.")
-            # Notify friends that user is offline
             for friend in get_friends(current_user):
                 if friend in ONLINE_USERS:
                     asyncio.create_task(sync_user_dashboard(friend))
@@ -231,7 +321,7 @@ async def handle_client(websocket):
 async def main():
     init_db()
     async with serve(handle_client, "127.0.0.1", 8765):
-        logging.info("Server running with Friends System on ws://127.0.0.1:8765")
+        logging.info("WebSocket Chat & Groups server running on ws://127.0.0.1:8765")
         await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":
