@@ -216,12 +216,23 @@ def get_user_groups(username: str):
         return [{"id": row[0], "name": row[1]} for row in c.fetchall()]
 
 def get_group_members_with_status(group_id: int):
-    with get_conn() as conn:
+    with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("SELECT username FROM group_members WHERE group_id = %s", (group_id,))
-        members = [row[0] for row in c.fetchall()]
-        return [{"username": m, "online": m in ONLINE_USERS} for m in members]
-
+        c.execute("""
+            SELECT gm.username, u.full_name 
+            FROM group_members gm
+            LEFT JOIN users u ON gm.username = u.username
+            WHERE gm.group_id = ?
+        """, (group_id,))
+        rows = c.fetchall()
+        return [
+            {
+                "username": row[0],
+                "full_name": row[1] or row[0],
+                "online": row[0] in ONLINE_USERS
+            }
+            for row in rows
+        ]
 def save_direct_message(sender: str, receiver: str, text: str):
     with get_conn() as conn:
         c = conn.cursor()

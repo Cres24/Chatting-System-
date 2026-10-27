@@ -54,7 +54,6 @@
             <div class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</div>
           </div>
         </div>
-        <div id="group-members-bar" class="members-container hidden"></div>
       </div>
 
       <!-- Bubble Message Feed -->
@@ -67,18 +66,28 @@
       </div>
     </div>
 
-    <!-- RIGHT PANEL: Dedicated Social Segment -->
+    <!-- RIGHT PANEL: Contextual Social & Group Info -->
     <div id="social-panel">
-      <!-- Add Friend Section -->
-      <div class="section-title">Add Friend</div>
-      <div class="social-input-group">
-        <input type="text" id="target-username" class="input-field" placeholder="Enter username..." />
-        <button class="btn btn-primary" onclick="sendFriendRequest()">Send Request</button>
+      <!-- VIEW A: Group Members (Active when inside a group) -->
+      <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
+        <div class="section-title">
+          <span>Group Members</span>
+          <span id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent);"></span>
+        </div>
+        <div id="group-members-list" class="sidebar-scrollable" style="flex-grow: 1; margin-top: 10px;"></div>
       </div>
 
-      <!-- Friend Requests Section -->
-      <div class="section-title" style="margin-top: 14px;">Friend Requests</div>
-      <div id="requests-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
+      <!-- VIEW B: Friend Management (Active by default / direct chats) -->
+      <div id="social-default-view">
+        <div class="section-title">Add Friend</div>
+        <div class="social-input-group">
+          <input type="text" id="target-username" class="input-field" placeholder="Enter username..." />
+          <button class="btn btn-primary" onclick="sendFriendRequest()">Send Request</button>
+        </div>
+
+        <div class="section-title" style="margin-top: 16px;">Friend Requests</div>
+        <div id="requests-list" class="sidebar-scrollable" style="max-height: 250px;"></div>
+      </div>
     </div>
   </div>
 
@@ -135,9 +144,9 @@
         } else if (data.action === "chat_history") {
           renderChatHistory(data.history);
           if (data.chat_type === "group") {
-            renderGroupMembers(data.members || []);
+            showGroupView(data.members || []);
           } else {
-            document.getElementById("group-members-bar").classList.add("hidden");
+            showDefaultSocialView();
           }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
@@ -150,6 +159,42 @@
     function logout() {
       sessionStorage.removeItem("chat_user");
       window.location.href = "login.html";
+    }
+
+    function showGroupView(members) {
+      document.getElementById("social-default-view").classList.add("hidden");
+      const groupView = document.getElementById("group-info-view");
+      groupView.classList.remove("hidden");
+
+      const list = document.getElementById("group-members-list");
+      list.innerHTML = "";
+
+      const onlineCount = members.filter(m => m.online).length;
+      document.getElementById("group-member-count").textContent = `${members.length} members (${onlineCount} online)`;
+      document.getElementById("chat-subtitle").textContent = `${members.length} members • ${onlineCount} online`;
+
+      members.forEach(member => {
+        const isMe = member.username === currentUser;
+        const displayName = member.full_name || member.username;
+        const div = document.createElement("div");
+        div.className = "member-row";
+        div.innerHTML = `
+          <div class="avatar-wrapper" style="width: 36px; height: 36px;">
+            <div class="user-avatar" style="font-size: 13px;">${displayName.charAt(0).toUpperCase()}</div>
+            <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
+          </div>
+          <div class="item-info">
+            <span class="item-title" style="font-size: 13px;">${displayName} ${isMe ? '<small style="color:var(--accent); font-weight:normal;">(you)</small>' : ''}</span>
+            <span class="item-subtitle">@${member.username}</span>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    function showDefaultSocialView() {
+      document.getElementById("group-info-view").classList.add("hidden");
+      document.getElementById("social-default-view").classList.remove("hidden");
     }
 
     function renderDashboard() {
@@ -241,7 +286,7 @@
 
       if (type === "group") {
         statusPip.className = "status-dot-pip online";
-        document.getElementById("chat-subtitle").textContent = "Group Channel";
+        document.getElementById("chat-subtitle").textContent = "Loading members...";
       } else {
         statusPip.className = `status-dot-pip ${isOnline ? 'online' : 'offline'}`;
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
@@ -260,25 +305,6 @@
           target_id: id
         }));
       }
-    }
-
-    function renderGroupMembers(members) {
-      const bar = document.getElementById("group-members-bar");
-      bar.innerHTML = "";
-      bar.classList.remove("hidden");
-
-      const onlineCount = members.filter(m => m.online).length;
-      document.getElementById("chat-subtitle").textContent = `${members.length} members • ${onlineCount} online`;
-
-      members.forEach(member => {
-        const chip = document.createElement("span");
-        chip.className = "member-chip";
-        chip.innerHTML = `
-          <span class="dot ${member.online ? 'online' : 'offline'}"></span>
-          ${member.username === currentUser ? member.username + " (you)" : member.username}
-        `;
-        bar.appendChild(chip);
-      });
     }
 
     function renderChatHistory(messages) {
