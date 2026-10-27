@@ -2,12 +2,31 @@ import asyncio
 import json
 import logging
 import sqlite3
+import hashlib
+import secrets
 from websockets.asyncio.server import serve
 
 logging.basicConfig(level=logging.INFO)
 
 DB_FILE = "chat.db"
 ONLINE_USERS = {}  # username -> websocket connection
+
+# ----------------- SECURITY & PASSWORD HASHING -----------------
+
+def hash_password(password: str, salt: str = None) -> tuple[str, str]:
+    if not salt:
+        salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        100000
+    ).hex()
+    return key, salt
+
+def verify_password(stored_hash: str, salt: str, password_attempt: str) -> bool:
+    new_hash, _ = hash_password(password_attempt, salt)
+    return secrets.compare_digest(stored_hash, new_hash)
 
 # ----------------- DATABASE INITIALIZATION & QUERIES -----------------
 
@@ -17,7 +36,11 @@ def init_db():
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL
+                full_name TEXT NOT NULL,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                password_salt TEXT NOT NULL
             )
         """)
         c.execute("""
@@ -69,22 +92,52 @@ def init_db():
         """)
         conn.commit()
 
-def get_or_create_user(username: str):
+def register_user(full_name: str, username: str, email: str, password: str):
+    p_hash, salt = hash_password(password)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO users (full_name, username, email, password_hash, password_salt)
+                VALUES (?, ?, ?, ?, ?)
+            """, (full_name, username, email.lower(), p_hash, salt))
+            conn.commit()
+            return True, "Registration successful! You can now log in."
+    except sqlite3.IntegrityError as e:
+        err_msg = str(e).lower()
+        if "username" in err_msg:
+            return False, "Username is already taken."
+        elif "email" in err_msg:
+            return False, "Email is already registered."
+        return False, "Account already exists."
+
+def authenticate_user(identifier: str, password: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO users (username) VALUES (?)", (username,))
-        conn.commit()
+        c.execute("""
+            SELECT full_name, username, email, password_hash, password_salt
+            FROM users
+            WHERE username = ? OR email = ?
+        """, (identifier, identifier.lower()))
+        user = c.fetchone()
+        if not user:
+            return None, "Invalid username or password."
+        
+        full_name, username, email, p_hash, salt = user
+        if verify_password(p_hash, salt, password):
+            return {"full_name": full_name, "username": username, "email": email}, "Success"
+        return None, "Invalid username or password."
 
 def get_friends(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT u2.username FROM users u1
+            SELECT u2.username, u2.full_name FROM users u1
             JOIN friends f ON u1.id = f.user_id
             JOIN users u2 ON f.friend_id = u2.id
             WHERE u1.username = ?
         """, (username,))
-        return [row[0] for row in c.fetchall()]
+        return [{"username": row[0], "full_name": row[1]} for row in c.fetchall()]
 
 def get_pending_requests(username: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -100,8 +153,11 @@ def add_friend_request(from_user: str, to_user: str):
         c.execute("SELECT id FROM users WHERE username = ?", (to_user,))
         if not c.fetchone():
             return False, "User does not exist."
-        if to_user in get_friends(from_user):
+        
+        friends = [f["username"] for f in get_friends(from_user)]
+        if to_user in friends:
             return False, "Already friends."
+        
         c.execute("SELECT id FROM friend_requests WHERE from_user = ? AND to_user = ? AND status = 'pending'", (from_user, to_user))
         if c.fetchone():
             return False, "Request already sent."
@@ -195,7 +251,10 @@ async def sync_user_dashboard(username: str):
     if not ws:
         return
     friends = get_friends(username)
-    friends_status = [{"username": f, "online": f in ONLINE_USERS} for f in friends]
+    friends_status = [
+        {"username": f["username"], "full_name": f["full_name"], "online": f["username"] in ONLINE_USERS}
+        for f in friends
+    ]
     pending = get_pending_requests(username)
     groups = get_user_groups(username)
 
@@ -215,21 +274,58 @@ async def handle_client(websocket):
             data = json.loads(raw_message)
             action = data.get("action")
 
-            if action == "login":
-                current_user = data.get("username", "").strip()
-                if not current_user:
+            if action == "register":
+                full_name = data.get("full_name", "").strip()
+                username = data.get("username", "").strip()
+                email = data.get("email", "").strip()
+                password = data.get("password", "")
+
+                if not (full_name and username and email and password):
+                    await send_json(websocket, {"action": "auth_error", "text": "All fields are required."})
                     continue
-                get_or_create_user(current_user)
+
+                success, message = register_user(full_name, username, email, password)
+                if success:
+                    await send_json(websocket, {"action": "register_success", "text": message})
+                else:
+                    await send_json(websocket, {"action": "auth_error", "text": message})
+
+            elif action == "login":
+                identifier = data.get("identifier", "").strip()
+                password = data.get("password", "")
+
+                user_profile, msg = authenticate_user(identifier, password)
+                if not user_profile:
+                    await send_json(websocket, {"action": "auth_error", "text": msg})
+                    continue
+
+                current_user = user_profile["username"]
                 ONLINE_USERS[current_user] = websocket
-                logging.info(f"{current_user} connected.")
+                logging.info(f"{current_user} authenticated.")
+
+                await send_json(websocket, {
+                    "action": "login_success",
+                    "user": user_profile
+                })
                 await sync_user_dashboard(current_user)
 
-                # Update online status for all confirmed friends
                 for friend in get_friends(current_user):
-                    if friend in ONLINE_USERS:
-                        await sync_user_dashboard(friend)
+                    if friend["username"] in ONLINE_USERS:
+                        await sync_user_dashboard(friend["username"])
+
+            elif action == "resume_session":
+                current_user = data.get("username", "").strip()
+                if current_user:
+                    ONLINE_USERS[current_user] = websocket
+                    logging.info(f"{current_user} resumed session on chat.html.")
+                    await sync_user_dashboard(current_user)
+                    for friend in get_friends(current_user):
+                        if friend["username"] in ONLINE_USERS:
+                            await sync_user_dashboard(friend["username"])
 
             elif action == "send_friend_request":
+                if not current_user:
+                    continue
                 target = data.get("to_user", "").strip()
                 success, msg = add_friend_request(current_user, target)
                 await send_json(websocket, {"action": "alert", "text": msg})
@@ -237,6 +333,8 @@ async def handle_client(websocket):
                     await sync_user_dashboard(target)
 
             elif action == "accept_friend_request":
+                if not current_user:
+                    continue
                 from_user = data.get("from_user")
                 accept_request(from_user, current_user)
                 await sync_user_dashboard(current_user)
@@ -244,6 +342,8 @@ async def handle_client(websocket):
                     await sync_user_dashboard(from_user)
 
             elif action == "create_group":
+                if not current_user:
+                    continue
                 name = data.get("name", "").strip()
                 members = data.get("members", [])
                 if not name:
@@ -257,6 +357,8 @@ async def handle_client(websocket):
                         await sync_user_dashboard(member)
 
             elif action == "load_chat":
+                if not current_user:
+                    continue
                 chat_type = data.get("chat_type")
                 target_id = data.get("target_id")
                 members = []
@@ -277,6 +379,8 @@ async def handle_client(websocket):
                 })
 
             elif action == "send_message":
+                if not current_user:
+                    continue
                 chat_type = data.get("chat_type")
                 target_id = data.get("target_id")
                 text = data.get("text", "").strip()
@@ -323,15 +427,16 @@ async def handle_client(websocket):
             del ONLINE_USERS[current_user]
             logging.info(f"{current_user} disconnected.")
             for friend in get_friends(current_user):
-                if friend in ONLINE_USERS:
-                    asyncio.create_task(sync_user_dashboard(friend))
+                if friend["username"] in ONLINE_USERS:
+                    asyncio.create_task(sync_user_dashboard(friend["username"]))
 
 # ----------------- MAIN RUNNER -----------------
 
 async def main():
     init_db()
-    async with serve(handle_client, "127.0.0.1", 8765):
-        logging.info("WebSocket chat server running on ws://127.0.0.1:8765")
+    # Bind to 0.0.0.0 to prevent localhost / 127.0.0.1 IP mismatches on Windows
+    async with serve(handle_client, "0.0.0.0", 8765):
+        logging.info("WebSocket chat server with Auth running on port 8765")
         await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":
