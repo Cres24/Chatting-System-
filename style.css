@@ -14,6 +14,7 @@
   --offline: #ef4444;
   --bubble-them: #29374e;
   --bubble-me: linear-gradient(135deg, #6366f1, #4f46e5);
+  --shadow-lg: 0 20px 30px -10px rgba(0, 0, 0, 0.5), 0 10px 15px -5px rgba(0, 0, 0, 0.3);
   --shadow-float: 0 16px 36px rgba(0, 0, 0, 0.45);
 }
 
@@ -38,7 +39,97 @@ body {
   display: none !important;
 }
 
-/* ================= 3-SEGMENT SPLIT VIEW ================= */
+/* ================= AUTHENTICATION CARDS (LOGIN & REGISTER) ================= */
+.auth-card {
+  background: var(--bg-card-solid);
+  padding: 38px 32px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 420px;
+  animation: fadeIn 0.25s ease forwards;
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.brand-badge {
+  font-size: 32px;
+  margin-bottom: 10px;
+  display: inline-block;
+}
+
+.auth-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.auth-header p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.auth-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.field-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.auth-footer {
+  margin-top: 22px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.auth-footer a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.auth-footer a:hover {
+  text-decoration: underline;
+}
+
+.auth-feedback {
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.auth-feedback.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.auth-feedback.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+/* ================= 3-SEGMENT SPLIT VIEW (CHAT WORKSPACE) ================= */
 #chat-view {
   display: flex;
   gap: 16px;
@@ -372,7 +463,7 @@ body {
   font-size: 13px;
 }
 
-/* CONTROLS & SHARED STYLES */
+/* SHARED INPUTS & BUTTONS */
 .input-field {
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -479,7 +570,13 @@ body {
 ::-webkit-scrollbar {
   width: 5px;
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 4px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
 }
