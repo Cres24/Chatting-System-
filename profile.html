@@ -33,7 +33,12 @@
 
       <div class="field-group">
         <label>New Password (leave blank to keep current)</label>
-        <input type="password" id="prof-password" class="input-field" placeholder="••••••••" />
+        <input type="password" id="prof-new-password" class="input-field" placeholder="••••••••" />
+      </div>
+
+      <div class="field-group">
+        <label style="color: #f87171;">Current Password (required to save changes)</label>
+        <input type="password" id="prof-current-password" class="input-field" placeholder="••••••••" />
       </div>
 
       <button class="btn btn-primary" onclick="submitProfileUpdate()">Save Changes</button>
@@ -50,7 +55,7 @@
     }
     const user = JSON.parse(sessionData || "{}");
 
-    // Pre-populate input values with current user info
+    // Pre-populate input values with existing session data
     document.getElementById("prof-fullname").value = user.full_name || "";
     document.getElementById("prof-username").value = user.username || "";
     document.getElementById("prof-email").value = user.email || "";
@@ -72,7 +77,7 @@
         if (data.action === "profile_error") {
           showFeedback(data.text, true);
         } else if (data.action === "profile_success") {
-          // Update local session storage with new values
+          // Update browser session with the latest updated profile
           sessionStorage.setItem("chat_user", JSON.stringify(data.user));
           showFeedback("Profile updated! Returning to chat...", false);
           setTimeout(() => {
@@ -90,10 +95,16 @@
       const new_fullname = document.getElementById("prof-fullname").value.trim();
       const new_username = document.getElementById("prof-username").value.trim();
       const new_email = document.getElementById("prof-email").value.trim();
-      const new_password = document.getElementById("prof-password").value;
+      const new_password = document.getElementById("prof-new-password").value;
+      const current_password = document.getElementById("prof-current-password").value;
 
       if (!new_fullname || !new_username || !new_email) {
         showFeedback("Full Name, Username, and Email cannot be empty.", true);
+        return;
+      }
+
+      if (!current_password) {
+        showFeedback("Please enter your current password to confirm changes.", true);
         return;
       }
 
@@ -106,6 +117,7 @@
       socket.send(JSON.stringify({
         action: "update_profile",
         current_username: user.username,
+        current_password: current_password,
         new_fullname: new_fullname,
         new_username: new_username,
         new_email: new_email,

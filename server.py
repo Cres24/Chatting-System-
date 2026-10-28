@@ -128,19 +128,29 @@ def authenticate_user(identifier: str, password: str):
             return {"full_name": full_name, "username": username, "email": email}, "Success"
         return None, "Invalid username or password."
 
-def update_user_profile(current_user: str, new_fullname: str, new_username: str, new_email: str, new_password: str = None):
+def update_user_profile(current_user: str, current_password: str, new_fullname: str, new_username: str, new_email: str, new_password: str = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             c = conn.cursor()
 
-            # 1. Update password if provided, otherwise preserve existing hash
+            # 1. Retrieve current credentials to verify password
+            c.execute("SELECT password_hash, password_salt FROM users WHERE username = ?", (current_user,))
+            row = c.fetchone()
+            if not row:
+                return False, "User not found."
+
+            stored_hash, salt = row
+            if not verify_password(stored_hash, salt, current_password):
+                return False, "Incorrect current password. Verification failed."
+
+            # 2. Update password if new one is supplied, otherwise preserve hash
             if new_password and new_password.strip():
-                p_hash, salt = hash_password(new_password)
+                p_hash, new_salt = hash_password(new_password)
                 c.execute("""
                     UPDATE users 
                     SET full_name = ?, username = ?, email = ?, password_hash = ?, password_salt = ?
                     WHERE username = ?
-                """, (new_fullname, new_username, new_email.lower(), p_hash, salt, current_user))
+                """, (new_fullname, new_username, new_email.lower(), p_hash, new_salt, current_user))
             else:
                 c.execute("""
                     UPDATE users 
@@ -148,7 +158,7 @@ def update_user_profile(current_user: str, new_fullname: str, new_username: str,
                     WHERE username = ?
                 """, (new_fullname, new_username, new_email.lower(), current_user))
 
-            # 2. If username changed, cascade the change to related relational tables
+            # 3. If username changed, cascade the change across all tables
             if current_user != new_username:
                 c.execute("UPDATE friend_requests SET from_user = ? WHERE from_user = ?", (new_username, current_user))
                 c.execute("UPDATE friend_requests SET to_user = ? WHERE to_user = ?", (new_username, current_user))
@@ -377,12 +387,20 @@ async def handle_client(websocket):
 
             elif action == "update_profile":
                 curr_user = data.get("current_username", "").strip()
+                curr_pw = data.get("current_password", "")
                 new_fn = data.get("new_fullname", "").strip()
                 new_un = data.get("new_username", "").strip()
                 new_em = data.get("new_email", "").strip()
                 new_pw = data.get("new_password", "")
 
-                success, msg = update_user_profile(curr_user, new_fn, new_un, new_em, new_pw)
+                if not curr_pw:
+                    await send_json(websocket, {
+                        "action": "profile_error",
+                        "text": "Current password is required."
+                    })
+                    continue
+
+                success, msg = update_user_profile(curr_user, curr_pw, new_fn, new_un, new_em, new_pw)
                 if success:
                     # Update active connection tracking if username changed
                     if curr_user != new_un:
@@ -517,9 +535,8 @@ async def handle_client(websocket):
 
 async def main():
     init_db()
-    # Bind to 0.0.0.0 to support connections from both 127.0.0.1 and localhost
     async with serve(handle_client, "0.0.0.0", 8765):
-        logging.info("WebSocket chat server with Auth running on port 8765")
+        logging.info("WebSocket chat server running on port 8765")
         await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":
