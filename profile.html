@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Edit Profile - Real-Time Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="brand-badge">👤</div>
+      <h2>Edit Profile</h2>
+      <p>Update your personal account details</p>
+    </div>
+
+    <div class="auth-fields">
+      <div class="field-group">
+        <label>Full Name</label>
+        <input type="text" id="prof-fullname" class="input-field" placeholder="Full Name" />
+      </div>
+
+      <div class="field-group">
+        <label>Username</label>
+        <input type="text" id="prof-username" class="input-field" placeholder="Username" />
+      </div>
+
+      <div class="field-group">
+        <label>Email Address</label>
+        <input type="email" id="prof-email" class="input-field" placeholder="Email Address" />
+      </div>
+
+      <div class="field-group">
+        <label>New Password (leave blank to keep current)</label>
+        <input type="password" id="prof-new-password" class="input-field" placeholder="••••••••" />
+      </div>
+
+      <div class="field-group">
+        <label style="color: #f87171;">Current Password (required to save changes)</label>
+        <input type="password" id="prof-current-password" class="input-field" placeholder="••••••••" />
+      </div>
+
+      <button class="btn btn-primary" onclick="submitProfileUpdate()">Save Changes</button>
+      <button class="btn btn-secondary" onclick="window.location.href='chat.html'">Back to Chat</button>
+    </div>
+
+    <div id="feedback" class="auth-feedback hidden"></div>
+  </div>
+
+  <script>
+    const sessionData = sessionStorage.getItem("chat_user");
+    if (!sessionData) {
+      window.location.href = "login.html";
+    }
+    const user = JSON.parse(sessionData || "{}");
+
+    // Pre-populate input values with existing session data
+    document.getElementById("prof-fullname").value = user.full_name || "";
+    document.getElementById("prof-username").value = user.username || "";
+    document.getElementById("prof-email").value = user.email || "";
+
+    let socket = null;
+
+    function showFeedback(msg, isError) {
+      const fb = document.getElementById("feedback");
+      fb.textContent = msg;
+      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      fb.classList.remove("hidden");
+    }
+
+    function initSocket() {
+      socket = new WebSocket("ws://127.0.0.1:8765");
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.action === "profile_error") {
+          showFeedback(data.text, true);
+        } else if (data.action === "profile_success") {
+          // Update browser session with the latest updated profile
+          sessionStorage.setItem("chat_user", JSON.stringify(data.user));
+          showFeedback("Profile updated! Returning to chat...", false);
+          setTimeout(() => {
+            window.location.href = "chat.html";
+          }, 1000);
+        }
+      };
+
+      socket.onclose = () => {
+        showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+      };
+    }
+
+    function submitProfileUpdate() {
+      const new_fullname = document.getElementById("prof-fullname").value.trim();
+      const new_username = document.getElementById("prof-username").value.trim();
+      const new_email = document.getElementById("prof-email").value.trim();
+      const new_password = document.getElementById("prof-new-password").value;
+      const current_password = document.getElementById("prof-current-password").value;
+
+      if (!new_fullname || !new_username || !new_email) {
+        showFeedback("Full Name, Username, and Email cannot be empty.", true);
+        return;
+      }
+
+      if (!current_password) {
+        showFeedback("Please enter your current password to confirm changes.", true);
+        return;
+      }
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showFeedback("Connecting to server, please wait...", true);
+        initSocket();
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        action: "update_profile",
+        current_username: user.username,
+        current_password: current_password,
+        new_fullname: new_fullname,
+        new_username: new_username,
+        new_email: new_email,
+        new_password: new_password
+      }));
+    }
+
+    window.addEventListener("DOMContentLoaded", initSocket);
+  </script>
+</body>
+</html>
