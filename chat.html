@@ -24,6 +24,7 @@
         <button class="btn btn-secondary btn-icon" title="Edit Profile" onclick="window.location.href='profile.html'">✏️</button>
         <button class="btn btn-secondary btn-icon" title="Log Out" onclick="logout()">✕</button>
       </div>
+
       <!-- Find a Friend Filter Bar -->
       <div class="search-box">
         <input type="text" id="friend-filter" class="input-field" placeholder="Find a friend..." oninput="filterConversations()" />
@@ -119,6 +120,7 @@
     let currentFriends = [];
     let currentRequests = [];
     let currentGroups = [];
+    let cachedGroupMembers = [];
 
     // Header Init
     document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
@@ -139,12 +141,16 @@
           currentRequests = data.requests;
           currentGroups = data.groups;
           renderDashboard();
+          if (activeChat && activeChat.type === "group") {
+            showGroupView(cachedGroupMembers);
+          }
         } else if (data.action === "alert") {
           alert(data.text);
         } else if (data.action === "chat_history") {
           renderChatHistory(data.history);
           if (data.chat_type === "group") {
-            showGroupView(data.members || []);
+            cachedGroupMembers = data.members || [];
+            showGroupView(cachedGroupMembers);
           } else {
             showDefaultSocialView();
           }
@@ -162,6 +168,7 @@
     }
 
     function showGroupView(members) {
+      cachedGroupMembers = members;
       document.getElementById("social-default-view").classList.add("hidden");
       const groupView = document.getElementById("group-info-view");
       groupView.classList.remove("hidden");
@@ -173,20 +180,38 @@
       document.getElementById("group-member-count").textContent = `${members.length} members (${onlineCount} online)`;
       document.getElementById("chat-subtitle").textContent = `${members.length} members • ${onlineCount} online`;
 
+      // Set of usernames who are already friends
+      const friendUsernames = new Set(currentFriends.map(f => f.username));
+
       members.forEach(member => {
         const isMe = member.username === currentUser;
+        const isFriend = friendUsernames.has(member.username);
         const displayName = member.full_name || member.username;
+
+        let actionHtml = "";
+        if (isMe) {
+          actionHtml = `<span style="font-size: 11px; color: var(--accent);">(you)</span>`;
+        } else if (isFriend) {
+          actionHtml = `<span style="font-size: 11px; color: var(--online);">Friend</span>`;
+        } else {
+          actionHtml = `<button class="btn btn-sm btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`;
+        }
+
         const div = document.createElement("div");
         div.className = "member-row";
+        div.style.justifyContent = "space-between";
         div.innerHTML = `
-          <div class="avatar-wrapper" style="width: 36px; height: 36px;">
-            <div class="user-avatar" style="font-size: 13px;">${displayName.charAt(0).toUpperCase()}</div>
-            <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
+          <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+            <div class="avatar-wrapper" style="width: 34px; height: 34px; flex-shrink: 0;">
+              <div class="user-avatar" style="font-size: 12px;">${displayName.charAt(0).toUpperCase()}</div>
+              <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
+            </div>
+            <div class="item-info">
+              <span class="item-title" style="font-size: 13px;">${displayName}</span>
+              <span class="item-subtitle">@${member.username}</span>
+            </div>
           </div>
-          <div class="item-info">
-            <span class="item-title" style="font-size: 13px;">${displayName} ${isMe ? '<small style="color:var(--accent); font-weight:normal;">(you)</small>' : ''}</span>
-            <span class="item-subtitle">@${member.username}</span>
-          </div>
+          <div>${actionHtml}</div>
         `;
         list.appendChild(div);
       });
@@ -359,11 +384,14 @@
       }
     }
 
-    function sendFriendRequest() {
-      const target = document.getElementById("target-username").value.trim();
+    // Supports both input box and direct button clicks from group member list
+    function sendFriendRequest(targetUsername = null) {
+      const target = targetUsername || document.getElementById("target-username").value.trim();
       if (target && socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ action: "send_friend_request", to_user: target }));
-        document.getElementById("target-username").value = "";
+        if (!targetUsername) {
+          document.getElementById("target-username").value = "";
+        }
       }
     }
 
