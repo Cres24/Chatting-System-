@@ -13,17 +13,17 @@
     <div id="sidebar">
       <!-- Signed In User Bar -->
       <div class="user-profile-header">
-        <div class="avatar-wrapper">
+        <div class="avatar-wrapper" style="cursor: pointer;" onclick="window.location.href='profile.html'" title="Edit Profile">
           <div class="user-avatar" id="current-user-avatar">?</div>
           <span class="status-dot-pip online"></span>
         </div>
-        <div class="user-meta">
+        <div class="user-meta" style="cursor: pointer;" onclick="window.location.href='profile.html'" title="Edit Profile">
           <span class="name" id="current-user-fullname"></span>
-          <span class="tag">Online</span>
+          <span class="tag">Online • Edit</span>
         </div>
+        <button class="btn btn-secondary btn-icon" title="Edit Profile" onclick="window.location.href='profile.html'">✏️</button>
         <button class="btn btn-secondary btn-icon" title="Log Out" onclick="logout()">✕</button>
       </div>
-
       <!-- Find a Friend Filter Bar -->
       <div class="search-box">
         <input type="text" id="friend-filter" class="input-field" placeholder="Find a friend..." oninput="filterConversations()" />

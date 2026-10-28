@@ -128,6 +128,46 @@ def authenticate_user(identifier: str, password: str):
             return {"full_name": full_name, "username": username, "email": email}, "Success"
         return None, "Invalid username or password."
 
+def update_user_profile(current_user: str, new_fullname: str, new_username: str, new_email: str, new_password: str = None):
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+
+            # 1. Update password if provided, otherwise preserve existing hash
+            if new_password and new_password.strip():
+                p_hash, salt = hash_password(new_password)
+                c.execute("""
+                    UPDATE users 
+                    SET full_name = ?, username = ?, email = ?, password_hash = ?, password_salt = ?
+                    WHERE username = ?
+                """, (new_fullname, new_username, new_email.lower(), p_hash, salt, current_user))
+            else:
+                c.execute("""
+                    UPDATE users 
+                    SET full_name = ?, username = ?, email = ?
+                    WHERE username = ?
+                """, (new_fullname, new_username, new_email.lower(), current_user))
+
+            # 2. If username changed, cascade the change to related relational tables
+            if current_user != new_username:
+                c.execute("UPDATE friend_requests SET from_user = ? WHERE from_user = ?", (new_username, current_user))
+                c.execute("UPDATE friend_requests SET to_user = ? WHERE to_user = ?", (new_username, current_user))
+                c.execute("UPDATE direct_messages SET sender = ? WHERE sender = ?", (new_username, current_user))
+                c.execute("UPDATE direct_messages SET receiver = ? WHERE receiver = ?", (new_username, current_user))
+                c.execute("UPDATE groups SET creator = ? WHERE creator = ?", (new_username, current_user))
+                c.execute("UPDATE group_members SET username = ? WHERE username = ?", (new_username, current_user))
+                c.execute("UPDATE group_messages SET sender = ? WHERE sender = ?", (new_username, current_user))
+
+            conn.commit()
+            return True, "Profile updated successfully."
+    except sqlite3.IntegrityError as e:
+        err = str(e).lower()
+        if "username" in err:
+            return False, "This username is already taken."
+        elif "email" in err:
+            return False, "This email is already in use."
+        return False, "Failed to update profile."
+
 def get_friends(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -329,11 +369,42 @@ async def handle_client(websocket):
                 current_user = data.get("username", "").strip()
                 if current_user:
                     ONLINE_USERS[current_user] = websocket
-                    logging.info(f"{current_user} resumed session on chat.html.")
+                    logging.info(f"{current_user} resumed session.")
                     await sync_user_dashboard(current_user)
                     for friend in get_friends(current_user):
                         if friend["username"] in ONLINE_USERS:
                             await sync_user_dashboard(friend["username"])
+
+            elif action == "update_profile":
+                curr_user = data.get("current_username", "").strip()
+                new_fn = data.get("new_fullname", "").strip()
+                new_un = data.get("new_username", "").strip()
+                new_em = data.get("new_email", "").strip()
+                new_pw = data.get("new_password", "")
+
+                success, msg = update_user_profile(curr_user, new_fn, new_un, new_em, new_pw)
+                if success:
+                    # Update active connection tracking if username changed
+                    if curr_user != new_un:
+                        if curr_user in ONLINE_USERS:
+                            del ONLINE_USERS[curr_user]
+                        ONLINE_USERS[new_un] = websocket
+                        current_user = new_un
+
+                    await send_json(websocket, {
+                        "action": "profile_success",
+                        "user": {
+                            "full_name": new_fn,
+                            "username": new_un,
+                            "email": new_em
+                        }
+                    })
+                    await sync_user_dashboard(new_un)
+                else:
+                    await send_json(websocket, {
+                        "action": "profile_error",
+                        "text": msg
+                    })
 
             elif action == "send_friend_request":
                 if not current_user:
