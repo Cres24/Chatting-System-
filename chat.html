@@ -9,7 +9,7 @@
 <body>
 
   <div id="chat-view">
-    <!-- LEFT PANEL: Conversation Directory & Search -->
+    <!-- PANEL 1: LEFT DIRECTORY & SEARCH -->
     <div id="sidebar">
       <!-- Signed In User Bar -->
       <div class="user-profile-header">
@@ -42,7 +42,7 @@
       <div id="friends-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
     </div>
 
-    <!-- CENTER PANEL: Main Chat Workspace -->
+    <!-- PANEL 2: CENTER CHAT -->
     <div id="main-chat">
       <div class="chat-topbar">
         <div class="topbar-left">
@@ -57,10 +57,10 @@
         </div>
       </div>
 
-      <!-- Bubble Message Feed -->
+      <!-- Message History Stream -->
       <div id="chat-box"></div>
 
-      <!-- Rounded Input Capsule with Media Attachment -->
+      <!-- Rounded Input Capsule with Media Attachment & Voice Recorder -->
       <div class="chat-input-bar">
         <input 
           type="file" 
@@ -77,12 +77,21 @@
         >
           📎
         </button>
+        <button 
+          type="button" 
+          id="record-btn" 
+          class="btn btn-secondary btn-icon" 
+          title="Record Voice Note" 
+          onclick="toggleVoiceRecording()"
+        >
+          🎙️
+        </button>
         <input type="text" id="message-input" class="input-field" placeholder="Type your message..." style="flex-grow: 1;" disabled />
         <button id="send-btn" class="btn btn-primary" onclick="sendMessage()" disabled>Send</button>
       </div>
     </div>
 
-    <!-- RIGHT PANEL: Contextual Social & Group Info -->
+    <!-- PANEL 3: RIGHT SOCIAL & GROUP INFO -->
     <div id="social-panel">
       <!-- VIEW A: Group Members (Active when inside a group) -->
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
@@ -136,6 +145,11 @@
     let currentRequests = [];
     let currentGroups = [];
     let cachedGroupMembers = [];
+
+    // Audio recording state
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
 
     // Header Init
     document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
@@ -449,6 +463,64 @@
       };
       reader.readAsDataURL(file);
       event.target.value = "";
+    }
+
+    async function toggleVoiceRecording() {
+      if (!activeChat) {
+        alert("Please select a conversation first.");
+        return;
+      }
+
+      const recBtn = document.getElementById("record-btn");
+
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(track => track.stop());
+
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64Audio = reader.result;
+              if (socket && socket.readyState === WebSocket.OPEN && activeChat) {
+                socket.send(JSON.stringify({
+                  action: "send_message",
+                  chat_type: activeChat.type,
+                  target_id: activeChat.id,
+                  text: base64Audio,
+                  msg_type: "audio"
+                }));
+              }
+            };
+            reader.readAsDataURL(audioBlob);
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          recBtn.classList.add("recording");
+          recBtn.title = "Click to stop and send";
+        } catch (err) {
+          alert("Microphone permission denied or not supported.");
+          console.error("Mic error:", err);
+        }
+      } else {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        isRecording = false;
+        recBtn.classList.remove("recording");
+        recBtn.title = "Record Voice Note";
+      }
     }
 
     function sendFriendRequest(targetUsername = null) {
