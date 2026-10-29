@@ -595,3 +595,32 @@ body {
 .member-row:hover {
   background: rgba(255, 255, 255, 0.05);
 }
+/* Media Embed Styling */
+.chat-media-img {
+  max-width: 260px;
+  max-height: 220px;
+  border-radius: 12px;
+  display: block;
+  cursor: pointer;
+  object-fit: cover;
+  transition: transform 0.15s ease;
+}
+
+.chat-media-img:hover {
+  transform: scale(1.02);
+}
+
+.chat-media-video {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: 12px;
+  display: block;
+  outline: none;
+}
+
+.chat-media-audio {
+  max-width: 240px;
+  height: 38px;
+  display: block;
+  outline: none;
+}
