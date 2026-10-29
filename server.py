@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import hashlib
 import secrets
+import os
 from websockets.asyncio.server import serve
 
 logging.basicConfig(level=logging.INFO)
@@ -64,6 +65,7 @@ def init_db():
                 sender TEXT NOT NULL,
                 receiver TEXT NOT NULL,
                 text TEXT NOT NULL,
+                msg_type TEXT DEFAULT 'text',
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -87,9 +89,21 @@ def init_db():
                 group_id INTEGER NOT NULL,
                 sender TEXT NOT NULL,
                 text TEXT NOT NULL,
+                msg_type TEXT DEFAULT 'text',
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Safely migrate older database schemas if msg_type is absent
+        try:
+            c.execute("ALTER TABLE direct_messages ADD COLUMN msg_type TEXT DEFAULT 'text'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE group_messages ADD COLUMN msg_type TEXT DEFAULT 'text'")
+        except sqlite3.OperationalError:
+            pass
+
         conn.commit()
 
 def register_user(full_name: str, username: str, email: str, password: str):
@@ -122,7 +136,7 @@ def authenticate_user(identifier: str, password: str):
         user = c.fetchone()
         if not user:
             return None, "Invalid username or password."
-        
+
         full_name, username, email, p_hash, salt = user
         if verify_password(p_hash, salt, password):
             return {"full_name": full_name, "username": username, "email": email}, "Success"
@@ -143,7 +157,7 @@ def update_user_profile(current_user: str, current_password: str, new_fullname: 
             if not verify_password(stored_hash, salt, current_password):
                 return False, "Incorrect current password. Verification failed."
 
-            # 2. Update password if new one is supplied, otherwise preserve hash
+            # 2. Update password if new one is supplied, otherwise preserve current hash
             if new_password and new_password.strip():
                 p_hash, new_salt = hash_password(new_password)
                 c.execute("""
@@ -203,11 +217,11 @@ def add_friend_request(from_user: str, to_user: str):
         c.execute("SELECT id FROM users WHERE username = ?", (to_user,))
         if not c.fetchone():
             return False, "User does not exist."
-        
+
         friends = [f["username"] for f in get_friends(from_user)]
         if to_user in friends:
             return False, "Already friends."
-        
+
         c.execute("SELECT id FROM friend_requests WHERE from_user = ? AND to_user = ? AND status = 'pending'", (from_user, to_user))
         if c.fetchone():
             return False, "Request already sent."
@@ -267,37 +281,39 @@ def get_group_members_with_status(group_id: int):
             for row in rows
         ]
 
-def save_direct_message(sender: str, receiver: str, text: str):
+def save_direct_message(sender: str, receiver: str, text: str, msg_type: str = "text"):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO direct_messages (sender, receiver, text) VALUES (?, ?, ?)", (sender, receiver, text))
+        c.execute("INSERT INTO direct_messages (sender, receiver, text, msg_type) VALUES (?, ?, ?, ?)", 
+                  (sender, receiver, text, msg_type))
         conn.commit()
 
-def save_group_message(group_id: int, sender: str, text: str):
+def save_group_message(group_id: int, sender: str, text: str, msg_type: str = "text"):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO group_messages (group_id, sender, text) VALUES (?, ?, ?)", (group_id, sender, text))
+        c.execute("INSERT INTO group_messages (group_id, sender, text, msg_type) VALUES (?, ?, ?, ?)", 
+                  (group_id, sender, text, msg_type))
         conn.commit()
 
 def get_direct_history(u1: str, u2: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT sender, text FROM direct_messages
+            SELECT sender, text, COALESCE(msg_type, 'text') FROM direct_messages
             WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
             ORDER BY timestamp ASC LIMIT 50
         """, (u1, u2, u2, u1))
-        return [{"sender": row[0], "text": row[1]} for row in c.fetchall()]
+        return [{"sender": row[0], "text": row[1], "msg_type": row[2]} for row in c.fetchall()]
 
 def get_group_history(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT sender, text FROM group_messages
+            SELECT sender, text, COALESCE(msg_type, 'text') FROM group_messages
             WHERE group_id = ?
             ORDER BY timestamp ASC LIMIT 50
         """, (group_id,))
-        return [{"sender": row[0], "text": row[1]} for row in c.fetchall()]
+        return [{"sender": row[0], "text": row[1], "msg_type": row[2]} for row in c.fetchall()]
 
 # ----------------- NOTIFICATION & SYNC HELPERS -----------------
 
@@ -402,7 +418,7 @@ async def handle_client(websocket):
 
                 success, msg = update_user_profile(curr_user, curr_pw, new_fn, new_un, new_em, new_pw)
                 if success:
-                    # Update active connection tracking if username changed
+                    # Update active socket mapping if username changed
                     if curr_user != new_un:
                         if curr_user in ONLINE_USERS:
                             del ONLINE_USERS[curr_user]
@@ -485,17 +501,20 @@ async def handle_client(websocket):
                 chat_type = data.get("chat_type")
                 target_id = data.get("target_id")
                 text = data.get("text", "").strip()
+                msg_type = data.get("msg_type", "text")
+
                 if not text:
                     continue
 
                 if chat_type == "direct":
-                    save_direct_message(current_user, target_id, text)
+                    save_direct_message(current_user, target_id, text, msg_type)
                     payload = {
                         "action": "new_message",
                         "chat_type": "direct",
                         "target_id": current_user,
                         "sender": current_user,
-                        "text": text
+                        "text": text,
+                        "msg_type": msg_type
                     }
                     if target_id in ONLINE_USERS:
                         await send_json(ONLINE_USERS[target_id], payload)
@@ -509,13 +528,14 @@ async def handle_client(websocket):
                     if current_user not in member_names:
                         continue
 
-                    save_group_message(group_id, current_user, text)
+                    save_group_message(group_id, current_user, text, msg_type)
                     payload = {
                         "action": "new_message",
                         "chat_type": "group",
                         "target_id": group_id,
                         "sender": current_user,
-                        "text": text
+                        "text": text,
+                        "msg_type": msg_type
                     }
                     for name in member_names:
                         if name in ONLINE_USERS:
@@ -535,8 +555,12 @@ async def handle_client(websocket):
 
 async def main():
     init_db()
-    async with serve(handle_client, "0.0.0.0", 8765):
-        logging.info("WebSocket chat server running on port 8765")
+    # Read PORT from environment if available (useful for cloud platforms like Render), defaulting to 8765
+    port = int(os.environ.get("PORT", 8765))
+    
+    # max_size=15*1024*1024 allows sending images, audio, and videos up to 15MB via Base64
+    async with serve(handle_client, "0.0.0.0", port, max_size=15 * 1024 * 1024):
+        logging.info(f"WebSocket chat server running on port {port}")
         await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":

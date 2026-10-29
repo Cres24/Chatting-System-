@@ -9,7 +9,7 @@
 <body>
 
   <div id="chat-view">
-    <!-- LEFT PANEL: Conversation Directory & Search -->
+    <!-- PANEL 1: LEFT DIRECTORY & SEARCH -->
     <div id="sidebar">
       <!-- Signed In User Bar -->
       <div class="user-profile-header">
@@ -42,7 +42,7 @@
       <div id="friends-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
     </div>
 
-    <!-- CENTER PANEL: Main Chat Workspace -->
+    <!-- PANEL 2: CENTER CHAT -->
     <div id="main-chat">
       <div class="chat-topbar">
         <div class="topbar-left">
@@ -57,17 +57,41 @@
         </div>
       </div>
 
-      <!-- Bubble Message Feed -->
+      <!-- Message History Stream -->
       <div id="chat-box"></div>
 
-      <!-- Rounded Input Capsule -->
+      <!-- Rounded Input Capsule with Media Attachment & Voice Recorder -->
       <div class="chat-input-bar">
+        <input 
+          type="file" 
+          id="media-file-input" 
+          accept="image/*,audio/*,video/*" 
+          style="display: none;" 
+          onchange="handleFileSelected(event)" 
+        />
+        <button 
+          type="button" 
+          class="btn btn-secondary btn-icon" 
+          title="Attach Media" 
+          onclick="document.getElementById('media-file-input').click()"
+        >
+          📎
+        </button>
+        <button 
+          type="button" 
+          id="record-btn" 
+          class="btn btn-secondary btn-icon" 
+          title="Record Voice Note" 
+          onclick="toggleVoiceRecording()"
+        >
+          🎙️
+        </button>
         <input type="text" id="message-input" class="input-field" placeholder="Type your message..." style="flex-grow: 1;" disabled />
         <button id="send-btn" class="btn btn-primary" onclick="sendMessage()" disabled>Send</button>
       </div>
     </div>
 
-    <!-- RIGHT PANEL: Contextual Social & Group Info -->
+    <!-- PANEL 3: RIGHT SOCIAL & GROUP INFO -->
     <div id="social-panel">
       <!-- VIEW A: Group Members (Active when inside a group) -->
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
@@ -122,6 +146,11 @@
     let currentGroups = [];
     let cachedGroupMembers = [];
 
+    // Audio recording state
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+
     // Header Init
     document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
     document.getElementById("current-user-avatar").textContent = (user.full_name || currentUser).charAt(0).toUpperCase();
@@ -167,6 +196,12 @@
       window.location.href = "login.html";
     }
 
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     function showGroupView(members) {
       cachedGroupMembers = members;
       document.getElementById("social-default-view").classList.add("hidden");
@@ -180,7 +215,6 @@
       document.getElementById("group-member-count").textContent = `${members.length} members (${onlineCount} online)`;
       document.getElementById("chat-subtitle").textContent = `${members.length} members • ${onlineCount} online`;
 
-      // Set of usernames who are already friends
       const friendUsernames = new Set(currentFriends.map(f => f.username));
 
       members.forEach(member => {
@@ -207,8 +241,8 @@
               <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
             </div>
             <div class="item-info">
-              <span class="item-title" style="font-size: 13px;">${displayName}</span>
-              <span class="item-subtitle">@${member.username}</span>
+              <span class="item-title" style="font-size: 13px;">${escapeHtml(displayName)}</span>
+              <span class="item-subtitle">@${escapeHtml(member.username)}</span>
             </div>
           </div>
           <div>${actionHtml}</div>
@@ -223,14 +257,14 @@
     }
 
     function renderDashboard() {
-      // Pending Requests (Right Segment)
+      // Pending Requests
       const reqList = document.getElementById("requests-list");
       reqList.innerHTML = currentRequests.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No pending requests</span>";
       currentRequests.forEach(sender => {
         const div = document.createElement("div");
         div.className = "req-card";
         div.innerHTML = `
-          <span>${sender}</span>
+          <span>${escapeHtml(sender)}</span>
           <button class="btn btn-sm btn-primary" onclick="acceptRequest('${sender}')">Accept</button>
         `;
         reqList.appendChild(div);
@@ -239,7 +273,7 @@
       // Filter query
       const query = (document.getElementById("friend-filter")?.value || "").toLowerCase().trim();
 
-      // Groups (Left Segment)
+      // Groups
       const gList = document.getElementById("groups-list");
       gList.innerHTML = "";
       const filteredGroups = currentGroups.filter(g => g.name.toLowerCase().includes(query));
@@ -255,7 +289,7 @@
               <div class="user-avatar" style="background: #475569;">#</div>
             </div>
             <div class="item-info">
-              <span class="item-title">${g.name}</span>
+              <span class="item-title">${escapeHtml(g.name)}</span>
               <span class="item-subtitle">Group Channel</span>
             </div>
           `;
@@ -264,7 +298,7 @@
         });
       }
 
-      // Friends (Left Segment)
+      // Friends
       const fList = document.getElementById("friends-list");
       fList.innerHTML = "";
       const filteredFriends = currentFriends.filter(f => 
@@ -286,7 +320,7 @@
               <span class="status-dot-pip ${f.online ? 'online' : 'offline'}"></span>
             </div>
             <div class="item-info">
-              <span class="item-title">${f.full_name || f.username}</span>
+              <span class="item-title">${escapeHtml(f.full_name || f.username)}</span>
               <span class="item-subtitle">${f.online ? 'Online' : 'Offline'}</span>
             </div>
           `;
@@ -335,7 +369,7 @@
     function renderChatHistory(messages) {
       const box = document.getElementById("chat-box");
       box.innerHTML = "";
-      messages.forEach(m => appendMessage(m.sender, m.text));
+      messages.forEach(m => appendMessage(m.sender, m.text, m.msg_type || "text"));
     }
 
     function handleIncomingMessage(msg) {
@@ -344,11 +378,11 @@
       const isCurrentGroup = activeChat.type === "group" && msg.chat_type === "group" && activeChat.id === msg.target_id;
 
       if (isCurrentDirect || isCurrentGroup) {
-        appendMessage(msg.sender, msg.text);
+        appendMessage(msg.sender, msg.text, msg.msg_type || "text");
       }
     }
 
-    function appendMessage(sender, text) {
+    function appendMessage(sender, content, msgType = "text") {
       const box = document.getElementById("chat-box");
       const isMe = sender === currentUser;
 
@@ -358,10 +392,21 @@
       const avatar = `<div class="msg-avatar">${sender.charAt(0).toUpperCase()}</div>`;
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+      let bubbleContent = "";
+      if (msgType === "image") {
+        bubbleContent = `<img src="${content}" class="chat-media-img" onclick="window.open('${content}', '_blank')" />`;
+      } else if (msgType === "audio") {
+        bubbleContent = `<audio controls src="${content}" class="chat-media-audio"></audio>`;
+      } else if (msgType === "video") {
+        bubbleContent = `<video controls src="${content}" class="chat-media-video"></video>`;
+      } else {
+        bubbleContent = `<span>${escapeHtml(content)}</span>`;
+      }
+
       row.innerHTML = `
         ${avatar}
         <div class="msg-content-block">
-          <div class="msg-bubble">${text}</div>
+          <div class="msg-bubble">${bubbleContent}</div>
           <span class="msg-meta-time">${timeStr}</span>
         </div>
       `;
@@ -378,13 +423,106 @@
           action: "send_message",
           chat_type: activeChat.type,
           target_id: activeChat.id,
-          text: text
+          text: text,
+          msg_type: "text"
         }));
         input.value = "";
       }
     }
 
-    // Supports both input box and direct button clicks from group member list
+    function handleFileSelected(event) {
+      const file = event.target.files[0];
+      if (!file || !activeChat) return;
+
+      if (file.size > 10 * 1024 * 1024) {
+        alert("File size exceeds 10MB limit.");
+        event.target.value = "";
+        return;
+      }
+
+      let msgType = "text";
+      if (file.type.startsWith("image/")) msgType = "image";
+      else if (file.type.startsWith("audio/")) msgType = "audio";
+      else if (file.type.startsWith("video/")) msgType = "video";
+      else {
+        alert("Only images, audio, and videos are supported.");
+        event.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result;
+        socket.send(JSON.stringify({
+          action: "send_message",
+          chat_type: activeChat.type,
+          target_id: activeChat.id,
+          text: base64Data,
+          msg_type: msgType
+        }));
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    }
+
+    async function toggleVoiceRecording() {
+      if (!activeChat) {
+        alert("Please select a conversation first.");
+        return;
+      }
+
+      const recBtn = document.getElementById("record-btn");
+
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(track => track.stop());
+
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64Audio = reader.result;
+              if (socket && socket.readyState === WebSocket.OPEN && activeChat) {
+                socket.send(JSON.stringify({
+                  action: "send_message",
+                  chat_type: activeChat.type,
+                  target_id: activeChat.id,
+                  text: base64Audio,
+                  msg_type: "audio"
+                }));
+              }
+            };
+            reader.readAsDataURL(audioBlob);
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          recBtn.classList.add("recording");
+          recBtn.title = "Click to stop and send";
+        } catch (err) {
+          alert("Microphone permission denied or not supported.");
+          console.error("Mic error:", err);
+        }
+      } else {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        isRecording = false;
+        recBtn.classList.remove("recording");
+        recBtn.title = "Record Voice Note";
+      }
+    }
+
     function sendFriendRequest(targetUsername = null) {
       const target = targetUsername || document.getElementById("target-username").value.trim();
       if (target && socket && socket.readyState === WebSocket.OPEN) {
