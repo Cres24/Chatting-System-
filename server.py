@@ -41,7 +41,8 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                password_salt TEXT NOT NULL
+                password_salt TEXT NOT NULL,
+                avatar TEXT DEFAULT ''
             )
         """)
         c.execute("""
@@ -94,7 +95,11 @@ def init_db():
             )
         """)
 
-        # Safely migrate older database schemas if msg_type is absent
+        # Schema migrations
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         try:
             c.execute("ALTER TABLE direct_messages ADD COLUMN msg_type TEXT DEFAULT 'text'")
         except sqlite3.OperationalError:
@@ -112,8 +117,8 @@ def register_user(full_name: str, username: str, email: str, password: str):
         with sqlite3.connect(DB_FILE) as conn:
             c = conn.cursor()
             c.execute("""
-                INSERT INTO users (full_name, username, email, password_hash, password_salt)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users (full_name, username, email, password_hash, password_salt, avatar)
+                VALUES (?, ?, ?, ?, ?, '')
             """, (full_name, username, email.lower(), p_hash, salt))
             conn.commit()
             return True, "Registration successful! You can now log in."
@@ -129,7 +134,7 @@ def authenticate_user(identifier: str, password: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT full_name, username, email, password_hash, password_salt
+            SELECT full_name, username, email, password_hash, password_salt, COALESCE(avatar, '')
             FROM users
             WHERE username = ? OR email = ?
         """, (identifier, identifier.lower()))
@@ -137,42 +142,49 @@ def authenticate_user(identifier: str, password: str):
         if not user:
             return None, "Invalid username or password."
 
-        full_name, username, email, p_hash, salt = user
+        full_name, username, email, p_hash, salt, avatar = user
         if verify_password(p_hash, salt, password):
-            return {"full_name": full_name, "username": username, "email": email}, "Success"
+            return {
+                "full_name": full_name, 
+                "username": username, 
+                "email": email, 
+                "avatar": avatar
+            }, "Success"
         return None, "Invalid username or password."
 
-def update_user_profile(current_user: str, current_password: str, new_fullname: str, new_username: str, new_email: str, new_password: str = None):
+def update_user_profile(current_user: str, current_password: str, new_fullname: str, new_username: str, new_email: str, new_password: str = None, avatar: str = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             c = conn.cursor()
 
-            # 1. Retrieve current credentials to verify password
-            c.execute("SELECT password_hash, password_salt FROM users WHERE username = ?", (current_user,))
+            # 1. Verify current password
+            c.execute("SELECT password_hash, password_salt, avatar FROM users WHERE username = ?", (current_user,))
             row = c.fetchone()
             if not row:
                 return False, "User not found."
 
-            stored_hash, salt = row
+            stored_hash, salt, existing_avatar = row
             if not verify_password(stored_hash, salt, current_password):
                 return False, "Incorrect current password. Verification failed."
 
-            # 2. Update password if new one is supplied, otherwise preserve current hash
+            final_avatar = avatar if avatar is not None else existing_avatar
+
+            # 2. Update password if provided
             if new_password and new_password.strip():
                 p_hash, new_salt = hash_password(new_password)
                 c.execute("""
                     UPDATE users 
-                    SET full_name = ?, username = ?, email = ?, password_hash = ?, password_salt = ?
+                    SET full_name = ?, username = ?, email = ?, password_hash = ?, password_salt = ?, avatar = ?
                     WHERE username = ?
-                """, (new_fullname, new_username, new_email.lower(), p_hash, new_salt, current_user))
+                """, (new_fullname, new_username, new_email.lower(), p_hash, new_salt, final_avatar, current_user))
             else:
                 c.execute("""
                     UPDATE users 
-                    SET full_name = ?, username = ?, email = ?
+                    SET full_name = ?, username = ?, email = ?, avatar = ?
                     WHERE username = ?
-                """, (new_fullname, new_username, new_email.lower(), current_user))
+                """, (new_fullname, new_username, new_email.lower(), final_avatar, current_user))
 
-            # 3. If username changed, cascade the change across all tables
+            # 3. Cascade changes if username changed
             if current_user != new_username:
                 c.execute("UPDATE friend_requests SET from_user = ? WHERE from_user = ?", (new_username, current_user))
                 c.execute("UPDATE friend_requests SET to_user = ? WHERE to_user = ?", (new_username, current_user))
@@ -196,12 +208,12 @@ def get_friends(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT u2.username, u2.full_name FROM users u1
+            SELECT u2.username, u2.full_name, COALESCE(u2.avatar, '') FROM users u1
             JOIN friends f ON u1.id = f.user_id
             JOIN users u2 ON f.friend_id = u2.id
             WHERE u1.username = ?
         """, (username,))
-        return [{"username": row[0], "full_name": row[1]} for row in c.fetchall()]
+        return [{"username": row[0], "full_name": row[1], "avatar": row[2]} for row in c.fetchall()]
 
 def get_pending_requests(username: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -266,7 +278,7 @@ def get_group_members_with_status(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT gm.username, u.full_name 
+            SELECT gm.username, u.full_name, COALESCE(u.avatar, '')
             FROM group_members gm
             LEFT JOIN users u ON gm.username = u.username
             WHERE gm.group_id = ?
@@ -276,6 +288,7 @@ def get_group_members_with_status(group_id: int):
             {
                 "username": row[0],
                 "full_name": row[1] or row[0],
+                "avatar": row[2],
                 "online": row[0] in ONLINE_USERS
             }
             for row in rows
@@ -299,21 +312,31 @@ def get_direct_history(u1: str, u2: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT sender, text, COALESCE(msg_type, 'text') FROM direct_messages
-            WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
-            ORDER BY timestamp ASC LIMIT 50
+            SELECT dm.sender, dm.text, COALESCE(dm.msg_type, 'text'), COALESCE(u.avatar, '')
+            FROM direct_messages dm
+            LEFT JOIN users u ON dm.sender = u.username
+            WHERE (dm.sender = ? AND dm.receiver = ?) OR (dm.sender = ? AND dm.receiver = ?)
+            ORDER BY dm.timestamp ASC LIMIT 50
         """, (u1, u2, u2, u1))
-        return [{"sender": row[0], "text": row[1], "msg_type": row[2]} for row in c.fetchall()]
+        return [
+            {"sender": row[0], "text": row[1], "msg_type": row[2], "avatar": row[3]}
+            for row in c.fetchall()
+        ]
 
 def get_group_history(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT sender, text, COALESCE(msg_type, 'text') FROM group_messages
-            WHERE group_id = ?
-            ORDER BY timestamp ASC LIMIT 50
+            SELECT gm.sender, gm.text, COALESCE(gm.msg_type, 'text'), COALESCE(u.avatar, '')
+            FROM group_messages gm
+            LEFT JOIN users u ON gm.sender = u.username
+            WHERE gm.group_id = ?
+            ORDER BY gm.timestamp ASC LIMIT 50
         """, (group_id,))
-        return [{"sender": row[0], "text": row[1], "msg_type": row[2]} for row in c.fetchall()]
+        return [
+            {"sender": row[0], "text": row[1], "msg_type": row[2], "avatar": row[3]}
+            for row in c.fetchall()
+        ]
 
 # ----------------- NOTIFICATION & SYNC HELPERS -----------------
 
@@ -330,7 +353,7 @@ async def sync_user_dashboard(username: str):
         return
     friends = get_friends(username)
     friends_status = [
-        {"username": f["username"], "full_name": f["full_name"], "online": f["username"] in ONLINE_USERS}
+        {"username": f["username"], "full_name": f["full_name"], "avatar": f["avatar"], "online": f["username"] in ONLINE_USERS}
         for f in friends
     ]
     pending = get_pending_requests(username)
@@ -408,6 +431,7 @@ async def handle_client(websocket):
                 new_un = data.get("new_username", "").strip()
                 new_em = data.get("new_email", "").strip()
                 new_pw = data.get("new_password", "")
+                new_avatar = data.get("avatar", "")
 
                 if not curr_pw:
                     await send_json(websocket, {
@@ -416,9 +440,8 @@ async def handle_client(websocket):
                     })
                     continue
 
-                success, msg = update_user_profile(curr_user, curr_pw, new_fn, new_un, new_em, new_pw)
+                success, msg = update_user_profile(curr_user, curr_pw, new_fn, new_un, new_em, new_pw, new_avatar)
                 if success:
-                    # Update active socket mapping if username changed
                     if curr_user != new_un:
                         if curr_user in ONLINE_USERS:
                             del ONLINE_USERS[curr_user]
@@ -430,10 +453,14 @@ async def handle_client(websocket):
                         "user": {
                             "full_name": new_fn,
                             "username": new_un,
-                            "email": new_em
+                            "email": new_em,
+                            "avatar": new_avatar
                         }
                     })
                     await sync_user_dashboard(new_un)
+                    for friend in get_friends(new_un):
+                        if friend["username"] in ONLINE_USERS:
+                            await sync_user_dashboard(friend["username"])
                 else:
                     await send_json(websocket, {
                         "action": "profile_error",
@@ -506,6 +533,13 @@ async def handle_client(websocket):
                 if not text:
                     continue
 
+                # Fetch sender's avatar
+                with sqlite3.connect(DB_FILE) as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
+                    row = c.fetchone()
+                    sender_avatar = row[0] if row else ""
+
                 if chat_type == "direct":
                     save_direct_message(current_user, target_id, text, msg_type)
                     payload = {
@@ -514,7 +548,8 @@ async def handle_client(websocket):
                         "target_id": current_user,
                         "sender": current_user,
                         "text": text,
-                        "msg_type": msg_type
+                        "msg_type": msg_type,
+                        "avatar": sender_avatar
                     }
                     if target_id in ONLINE_USERS:
                         await send_json(ONLINE_USERS[target_id], payload)
@@ -535,7 +570,8 @@ async def handle_client(websocket):
                         "target_id": group_id,
                         "sender": current_user,
                         "text": text,
-                        "msg_type": msg_type
+                        "msg_type": msg_type,
+                        "avatar": sender_avatar
                     }
                     for name in member_names:
                         if name in ONLINE_USERS:
@@ -555,10 +591,7 @@ async def handle_client(websocket):
 
 async def main():
     init_db()
-    # Read PORT from environment if available (useful for cloud platforms like Render), defaulting to 8765
     port = int(os.environ.get("PORT", 8765))
-    
-    # max_size=15*1024*1024 allows sending images, audio, and videos up to 15MB via Base64
     async with serve(handle_client, "0.0.0.0", port, max_size=15 * 1024 * 1024):
         logging.info(f"WebSocket chat server running on port {port}")
         await asyncio.get_running_loop().create_future()
