@@ -53,6 +53,13 @@ def init_db():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS blocked_users (
+                blocker_username TEXT NOT NULL,
+                blocked_username TEXT NOT NULL,
+                PRIMARY KEY (blocker_username, blocked_username)
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS friend_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_user TEXT NOT NULL,
@@ -95,7 +102,7 @@ def init_db():
             )
         """)
 
-        # Schema migrations
+        # Migrations
         try:
             c.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
         except sqlite3.OperationalError:
@@ -157,7 +164,6 @@ def update_user_profile(current_user: str, current_password: str, new_fullname: 
         with sqlite3.connect(DB_FILE) as conn:
             c = conn.cursor()
 
-            # 1. Verify current password
             c.execute("SELECT password_hash, password_salt, avatar FROM users WHERE username = ?", (current_user,))
             row = c.fetchone()
             if not row:
@@ -169,7 +175,6 @@ def update_user_profile(current_user: str, current_password: str, new_fullname: 
 
             final_avatar = avatar if avatar is not None else existing_avatar
 
-            # 2. Update password if provided
             if new_password and new_password.strip():
                 p_hash, new_salt = hash_password(new_password)
                 c.execute("""
@@ -184,7 +189,6 @@ def update_user_profile(current_user: str, current_password: str, new_fullname: 
                     WHERE username = ?
                 """, (new_fullname, new_username, new_email.lower(), final_avatar, current_user))
 
-            # 3. Cascade changes if username changed
             if current_user != new_username:
                 c.execute("UPDATE friend_requests SET from_user = ? WHERE from_user = ?", (new_username, current_user))
                 c.execute("UPDATE friend_requests SET to_user = ? WHERE to_user = ?", (new_username, current_user))
@@ -193,6 +197,8 @@ def update_user_profile(current_user: str, current_password: str, new_fullname: 
                 c.execute("UPDATE groups SET creator = ? WHERE creator = ?", (new_username, current_user))
                 c.execute("UPDATE group_members SET username = ? WHERE username = ?", (new_username, current_user))
                 c.execute("UPDATE group_messages SET sender = ? WHERE sender = ?", (new_username, current_user))
+                c.execute("UPDATE blocked_users SET blocker_username = ? WHERE blocker_username = ?", (new_username, current_user))
+                c.execute("UPDATE blocked_users SET blocked_username = ? WHERE blocked_username = ?", (new_username, current_user))
 
             conn.commit()
             return True, "Profile updated successfully."
@@ -215,6 +221,51 @@ def get_friends(username: str):
         """, (username,))
         return [{"username": row[0], "full_name": row[1], "avatar": row[2]} for row in c.fetchall()]
 
+def get_blocked_users(username: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT blocked_username FROM blocked_users WHERE blocker_username = ?", (username,))
+        return [row[0] for row in c.fetchall()]
+
+def is_blocked_pair(user_a: str, user_b: str) -> bool:
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT 1 FROM blocked_users 
+            WHERE (blocker_username = ? AND blocked_username = ?)
+               OR (blocker_username = ? AND blocked_username = ?)
+        """, (user_a, user_b, user_b, user_a))
+        return c.fetchone() is not None
+
+def unfriend_user(user_a: str, user_b: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = ?", (user_a,))
+        u1_row = c.fetchone()
+        c.execute("SELECT id FROM users WHERE username = ?", (user_b,))
+        u2_row = c.fetchone()
+        if u1_row and u2_row:
+            u1, u2 = u1_row[0], u2_row[0]
+            c.execute("DELETE FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", (u1, u2, u2, u1))
+            conn.commit()
+
+def block_user(blocker: str, blocked: str):
+    unfriend_user(blocker, blocked)
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO blocked_users (blocker_username, blocked_username) VALUES (?, ?)", (blocker, blocked))
+        c.execute("""
+            DELETE FROM friend_requests 
+            WHERE (from_user = ? AND to_user = ?) OR (from_user = ? AND to_user = ?)
+        """, (blocker, blocked, blocked, blocker))
+        conn.commit()
+
+def unblock_user(blocker: str, blocked: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM blocked_users WHERE blocker_username = ? AND blocked_username = ?", (blocker, blocked))
+        conn.commit()
+
 def get_pending_requests(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -224,6 +275,9 @@ def get_pending_requests(username: str):
 def add_friend_request(from_user: str, to_user: str):
     if from_user == to_user:
         return False, "You cannot add yourself."
+    if is_blocked_pair(from_user, to_user):
+        return False, "Cannot send request: interaction is blocked."
+
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT id FROM users WHERE username = ?", (to_user,))
@@ -242,6 +296,8 @@ def add_friend_request(from_user: str, to_user: str):
         return True, "Request sent."
 
 def accept_request(from_user: str, to_user: str):
+    if is_blocked_pair(from_user, to_user):
+        return
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT id FROM users WHERE username = ?", (from_user,))
@@ -358,12 +414,14 @@ async def sync_user_dashboard(username: str):
     ]
     pending = get_pending_requests(username)
     groups = get_user_groups(username)
+    blocked = get_blocked_users(username)
 
     await send_json(ws, {
         "action": "dashboard_sync",
         "friends": friends_status,
         "requests": pending,
-        "groups": groups
+        "groups": groups,
+        "blocked": blocked
     })
 
 # ----------------- CLIENT HANDLER -----------------
@@ -485,6 +543,31 @@ async def handle_client(websocket):
                 if from_user in ONLINE_USERS:
                     await sync_user_dashboard(from_user)
 
+            elif action == "unfriend":
+                if not current_user:
+                    continue
+                target = data.get("target_username")
+                unfriend_user(current_user, target)
+                await sync_user_dashboard(current_user)
+                if target in ONLINE_USERS:
+                    await sync_user_dashboard(target)
+
+            elif action == "block":
+                if not current_user:
+                    continue
+                target = data.get("target_username")
+                block_user(current_user, target)
+                await sync_user_dashboard(current_user)
+                if target in ONLINE_USERS:
+                    await sync_user_dashboard(target)
+
+            elif action == "unblock":
+                if not current_user:
+                    continue
+                target = data.get("target_username")
+                unblock_user(current_user, target)
+                await sync_user_dashboard(current_user)
+
             elif action == "create_group":
                 if not current_user:
                     continue
@@ -533,14 +616,18 @@ async def handle_client(websocket):
                 if not text:
                     continue
 
-                # Fetch sender's avatar
-                with sqlite3.connect(DB_FILE) as conn:
-                    c = conn.cursor()
-                    c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
-                    row = c.fetchone()
-                    sender_avatar = row[0] if row else ""
-
                 if chat_type == "direct":
+                    if is_blocked_pair(current_user, target_id):
+                        await send_json(websocket, {"action": "alert", "text": "Message blocked: communication is not allowed."})
+                        continue
+
+                    # Fetch sender avatar
+                    with sqlite3.connect(DB_FILE) as conn:
+                        c = conn.cursor()
+                        c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
+                        row = c.fetchone()
+                        sender_avatar = row[0] if row else ""
+
                     save_direct_message(current_user, target_id, text, msg_type)
                     payload = {
                         "action": "new_message",
@@ -562,6 +649,12 @@ async def handle_client(websocket):
 
                     if current_user not in member_names:
                         continue
+
+                    with sqlite3.connect(DB_FILE) as conn:
+                        c = conn.cursor()
+                        c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
+                        row = c.fetchone()
+                        sender_avatar = row[0] if row else ""
 
                     save_group_message(group_id, current_user, text, msg_type)
                     payload = {
