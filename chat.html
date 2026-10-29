@@ -146,14 +146,20 @@
     let currentGroups = [];
     let cachedGroupMembers = [];
 
-    // Audio recording state
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
 
+    function renderAvatarHTML(avatarUrl, nameFallback) {
+      if (avatarUrl) {
+        return `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`;
+      }
+      return (nameFallback || "?").charAt(0).toUpperCase();
+    }
+
     // Header Init
     document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
-    document.getElementById("current-user-avatar").textContent = (user.full_name || currentUser).charAt(0).toUpperCase();
+    document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(user.avatar, user.full_name || currentUser);
 
     function initWebSocket() {
       socket = new WebSocket("ws://127.0.0.1:8765");
@@ -237,7 +243,7 @@
         div.innerHTML = `
           <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
             <div class="avatar-wrapper" style="width: 34px; height: 34px; flex-shrink: 0;">
-              <div class="user-avatar" style="font-size: 12px;">${displayName.charAt(0).toUpperCase()}</div>
+              <div class="user-avatar" style="font-size: 12px; overflow: hidden;">${renderAvatarHTML(member.avatar, displayName)}</div>
               <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
             </div>
             <div class="item-info">
@@ -270,7 +276,6 @@
         reqList.appendChild(div);
       });
 
-      // Filter query
       const query = (document.getElementById("friend-filter")?.value || "").toLowerCase().trim();
 
       // Groups
@@ -293,7 +298,7 @@
               <span class="item-subtitle">Group Channel</span>
             </div>
           `;
-          div.onclick = () => selectChat("group", g.id, g.name, true);
+          div.onclick = () => selectChat("group", g.id, g.name, true, "");
           gList.appendChild(div);
         });
       }
@@ -313,10 +318,10 @@
           const div = document.createElement("div");
           const isActive = activeChat && activeChat.type === "direct" && activeChat.id === f.username;
           div.className = `list-item ${isActive ? 'active' : ''}`;
-          div.onclick = () => selectChat("direct", f.username, f.full_name || f.username, f.online);
+          div.onclick = () => selectChat("direct", f.username, f.full_name || f.username, f.online, f.avatar);
           div.innerHTML = `
             <div class="avatar-wrapper">
-              <div class="user-avatar">${(f.full_name || f.username).charAt(0).toUpperCase()}</div>
+              <div class="user-avatar" style="overflow: hidden;">${renderAvatarHTML(f.avatar, f.full_name || f.username)}</div>
               <span class="status-dot-pip ${f.online ? 'online' : 'offline'}"></span>
             </div>
             <div class="item-info">
@@ -333,20 +338,20 @@
       renderDashboard();
     }
 
-    function selectChat(type, id, name, isOnline) {
-      activeChat = { type, id, name };
+    function selectChat(type, id, name, isOnline, avatar = "") {
+      activeChat = { type, id, name, avatar };
 
       const avatarWrap = document.getElementById("active-chat-avatar-wrapper");
       const avatarEl = document.getElementById("active-chat-avatar");
       const statusPip = document.getElementById("active-chat-status-pip");
 
       avatarWrap.style.display = "block";
-      avatarEl.textContent = type === "group" ? "#" : name.charAt(0).toUpperCase();
-
       if (type === "group") {
+        avatarEl.innerHTML = "#";
         statusPip.className = "status-dot-pip online";
         document.getElementById("chat-subtitle").textContent = "Loading members...";
       } else {
+        avatarEl.innerHTML = renderAvatarHTML(avatar, name);
         statusPip.className = `status-dot-pip ${isOnline ? 'online' : 'offline'}`;
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
       }
@@ -369,7 +374,7 @@
     function renderChatHistory(messages) {
       const box = document.getElementById("chat-box");
       box.innerHTML = "";
-      messages.forEach(m => appendMessage(m.sender, m.text, m.msg_type || "text"));
+      messages.forEach(m => appendMessage(m.sender, m.text, m.msg_type || "text", m.avatar || ""));
     }
 
     function handleIncomingMessage(msg) {
@@ -378,18 +383,19 @@
       const isCurrentGroup = activeChat.type === "group" && msg.chat_type === "group" && activeChat.id === msg.target_id;
 
       if (isCurrentDirect || isCurrentGroup) {
-        appendMessage(msg.sender, msg.text, msg.msg_type || "text");
+        appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
     }
 
-    function appendMessage(sender, content, msgType = "text") {
+    function appendMessage(sender, content, msgType = "text", avatar = "") {
       const box = document.getElementById("chat-box");
       const isMe = sender === currentUser;
 
       const row = document.createElement("div");
       row.className = `msg-row ${isMe ? 'me' : 'them'}`;
 
-      const avatar = `<div class="msg-avatar">${sender.charAt(0).toUpperCase()}</div>`;
+      const avatarContent = renderAvatarHTML(avatar, sender);
+      const avatarHtml = `<div class="msg-avatar" style="overflow: hidden;">${avatarContent}</div>`;
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       let bubbleContent = "";
@@ -404,7 +410,7 @@
       }
 
       row.innerHTML = `
-        ${avatar}
+        ${avatarHtml}
         <div class="msg-content-block">
           <div class="msg-bubble">${bubbleContent}</div>
           <span class="msg-meta-time">${timeStr}</span>

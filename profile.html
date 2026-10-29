@@ -10,9 +10,15 @@
 
   <div class="auth-card">
     <div class="auth-header">
-      <div class="brand-badge">👤</div>
+      <!-- Clickable Avatar Preview -->
+      <div style="position: relative; display: inline-block; cursor: pointer; margin-bottom: 12px;" onclick="document.getElementById('avatar-file-input').click()" title="Click to change photo">
+        <div id="avatar-preview-box" class="user-avatar" style="width: 72px; height: 72px; font-size: 26px; margin: 0 auto; overflow: hidden; border: 2px solid var(--accent);">?</div>
+        <div style="position: absolute; bottom: 0; right: 0; background: var(--accent); color: #fff; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card-solid);">📷</div>
+      </div>
+      <input type="file" id="avatar-file-input" accept="image/*" style="display: none;" onchange="handleAvatarSelected(event)" />
+
       <h2>Edit Profile</h2>
-      <p>Update your personal account details</p>
+      <p>Update your photo and account details</p>
     </div>
 
     <div class="auth-fields">
@@ -55,10 +61,40 @@
     }
     const user = JSON.parse(sessionData || "{}");
 
-    // Pre-populate input values with existing session data
+    let currentAvatarBase64 = user.avatar || "";
+
+    // Pre-populate input values and current avatar
     document.getElementById("prof-fullname").value = user.full_name || "";
     document.getElementById("prof-username").value = user.username || "";
     document.getElementById("prof-email").value = user.email || "";
+
+    function renderAvatarPreview() {
+      const box = document.getElementById("avatar-preview-box");
+      if (currentAvatarBase64) {
+        box.innerHTML = `<img src="${currentAvatarBase64}" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      } else {
+        box.textContent = (user.full_name || user.username || "?").charAt(0).toUpperCase();
+      }
+    }
+    renderAvatarPreview();
+
+    function handleAvatarSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        showFeedback("Profile picture must be under 5MB.", true);
+        event.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        currentAvatarBase64 = reader.result;
+        renderAvatarPreview();
+      };
+      reader.readAsDataURL(file);
+    }
 
     let socket = null;
 
@@ -77,7 +113,6 @@
         if (data.action === "profile_error") {
           showFeedback(data.text, true);
         } else if (data.action === "profile_success") {
-          // Update browser session with the latest updated profile
           sessionStorage.setItem("chat_user", JSON.stringify(data.user));
           showFeedback("Profile updated! Returning to chat...", false);
           setTimeout(() => {
@@ -121,7 +156,8 @@
         new_fullname: new_fullname,
         new_username: new_username,
         new_email: new_email,
-        new_password: new_password
+        new_password: new_password,
+        avatar: currentAvatarBase64
       }));
     }
 
