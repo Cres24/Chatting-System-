@@ -23,3 +23,5 @@ public/vendor/
 public/uploads/
 .DS_Store
 .neon
+.vercel
+.env*
