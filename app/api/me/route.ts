@@ -10,7 +10,7 @@ import { getGroupMembers, getMemberIds, publishDashboard } from "@/lib/chat";
 import { getDb } from "@/lib/db";
 import { conversationMembers, conversations, friendships, users } from "@/lib/db/schema";
 import { HttpError, assertSameOrigin, handle, json, parseJson } from "@/lib/http";
-import { isAllowedUploadUrl } from "@/lib/storage";
+import { isAllowedStorageKey, requireStoredObject } from "@/lib/storage";
 import { profileSchema } from "@/lib/schemas";
 import { publishToUsers } from "@/lib/realtime";
 
@@ -64,17 +64,19 @@ export async function PATCH(request: NextRequest): Promise<Response> {
     }
     if (body.avatar === "") {
       updates.avatarUrl = "";
-    } else if (
-      body.avatar.startsWith("/api/avatar/") ||
-      body.avatar.startsWith("/uploads/") ||
-      isAllowedUploadUrl(body.avatar)
-    ) {
+    } else if (body.avatar.startsWith("/api/avatar/")) {
       // `/api/avatar/...` means "unchanged" (it is the proxy URL we returned).
-      if (!body.avatar.startsWith("/api/avatar/")) {
-        updates.avatarUrl = body.avatar;
-      }
+    } else if (
+      body.avatar.startsWith("/uploads/") ||
+      isAllowedStorageKey(body.avatar, "avatars", user.id)
+    ) {
+      await requireStoredObject(body.avatar, {
+        scope: "avatars",
+        ownerId: user.id,
+      });
+      updates.avatarUrl = body.avatar;
     } else {
-      throw new HttpError(400, "Invalid avatar URL.");
+      throw new HttpError(400, "Invalid avatar key.");
     }
 
     if (body.new_password) {

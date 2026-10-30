@@ -7,7 +7,7 @@ import { conversationMembers, conversations } from "@/lib/db/schema";
 import { HttpError, assertSameOrigin, handle, json, parseJson } from "@/lib/http";
 import { publishToUsers } from "@/lib/realtime";
 import { createGroupSchema } from "@/lib/schemas";
-import { isAllowedUploadUrl } from "@/lib/storage";
+import { isAllowedStorageKey, requireStoredObject } from "@/lib/storage";
 
 export async function POST(request: NextRequest): Promise<Response> {
   return handle(async () => {
@@ -15,10 +15,20 @@ export async function POST(request: NextRequest): Promise<Response> {
     const me = await requireUser();
     const body = await parseJson(request, createGroupSchema);
 
-    const avatar =
-      body.avatar && (body.avatar.startsWith("/uploads/") || isAllowedUploadUrl(body.avatar))
-        ? body.avatar
-        : "";
+    let avatar = "";
+    if (body.avatar) {
+      if (
+        !body.avatar.startsWith("/uploads/") &&
+        !isAllowedStorageKey(body.avatar, "avatars", me.id)
+      ) {
+        throw new HttpError(400, "Invalid group avatar key.");
+      }
+      await requireStoredObject(body.avatar, {
+        scope: "avatars",
+        ownerId: me.id,
+      });
+      avatar = body.avatar;
+    }
 
     const invitees = [] as { id: string; username: string }[];
     const seen = new Set<string>([me.id]);

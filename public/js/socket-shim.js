@@ -49,7 +49,7 @@
     }
     const file = window.ChatUpload.dataUrlToFile(value, scope);
     const uploaded = await window.ChatUpload.upload(file, scope);
-    return uploaded.url;
+    return uploaded.key;
   }
 
   async function refreshDashboard() {

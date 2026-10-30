@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "pg";
-import { put } from "@vercel/blob";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   extensionFor,
   parseDataUrl,
@@ -25,34 +25,58 @@ async function loadEnvLocal(): Promise<void> {
   }
 }
 
-const blobToken = () => process.env.BLOB_READ_WRITE_TOKEN ?? "";
-const blobAccess = (): "public" | "private" =>
-  process.env.BLOB_ACCESS === "public" ? "public" : "private";
+const objectStorageConfigured = (): boolean =>
+  Boolean(
+    process.env.S3_BUCKET &&
+      process.env.AWS_ENDPOINT_URL_S3 &&
+      process.env.AWS_REGION &&
+      process.env.AWS_ACCESS_KEY_ID &&
+      process.env.AWS_SECRET_ACCESS_KEY,
+  );
+
+let storageClient: S3Client | null = null;
+
+function getStorageClient(): S3Client {
+  if (!storageClient) {
+    storageClient = new S3Client({
+      forcePathStyle: true,
+      region: process.env.AWS_REGION,
+      endpoint: process.env.AWS_ENDPOINT_URL_S3,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "",
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "",
+      },
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return storageClient;
+}
 
 async function uploadDataUrl(
   dataUrl: string,
   prefix: string,
 ): Promise<string | null> {
-  if (!blobToken()) return null;
+  if (!objectStorageConfigured()) return null;
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) return null;
 
-  const result = await put(
-    `${prefix}/${randomUUID()}.${extensionFor(parsed.mimeType)}`,
-    parsed.buffer,
-    {
-      access: blobAccess(),
-      contentType: parsed.mimeType,
-      token: blobToken(),
-      addRandomSuffix: false,
-    },
+  const key = `${prefix}/${randomUUID()}.${extensionFor(parsed.mimeType)}`;
+  await getStorageClient().send(
+    new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET,
+      Key: key,
+      Body: parsed.buffer,
+      ContentType: parsed.mimeType,
+    }),
   );
-  return result.url;
+  return key;
 }
 
 async function main(): Promise<void> {
   await loadEnvLocal();
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString =
+    process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set (add it to .env.local).");
   }
@@ -66,9 +90,9 @@ async function main(): Promise<void> {
   console.log(`Importing ${exportPath}`);
   console.log(`  ${raw.users.length} users, ${raw.direct_messages.length} DMs, ${raw.groups.length} groups`);
 
-  if (!blobToken()) {
+  if (!objectStorageConfigured()) {
     console.warn(
-      "BLOB_READ_WRITE_TOKEN is not set: avatars and media attachments will be skipped.",
+      "Neon Object Storage is not configured: avatars and media attachments will be skipped.",
     );
   }
 
@@ -249,7 +273,9 @@ async function main(): Promise<void> {
       `Imported ${usernameToId.size} users, ${dmConversation.size} conversations, ${legacyGroupToId.size} groups.`,
     );
     if (skippedMedia > 0) {
-      console.warn(`Skipped ${skippedMedia} attachment(s) because Blob is not configured.`);
+      console.warn(
+      `Skipped ${skippedMedia} attachment(s) because object storage is not configured.`,
+    );
     }
   } catch (error) {
     await client.query("ROLLBACK");
@@ -279,7 +305,7 @@ async function insertLegacyMessage(
   let mimeType = "";
 
   if (isDataUrl) {
-    if (!blobToken()) {
+    if (!objectStorageConfigured()) {
       input.skipped();
       return;
     }

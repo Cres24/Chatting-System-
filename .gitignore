@@ -22,3 +22,4 @@ __pycache__/
 public/vendor/
 public/uploads/
 .DS_Store
+.neon

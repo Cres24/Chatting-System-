@@ -35,7 +35,7 @@ export const profileSchema = z.object({
 });
 
 export const attachmentSchema = z.object({
-  url: z.string().min(1).max(1000),
+  key: z.string().min(1).max(1000),
   mime_type: z.string().min(1).max(120),
   size: z.number().int().nonnegative().max(10 * 1024 * 1024),
 });

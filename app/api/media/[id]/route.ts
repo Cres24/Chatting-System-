@@ -10,7 +10,7 @@ import { serveStoredAsset } from "@/lib/storage";
 const idSchema = z.string().uuid();
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   try {
@@ -34,7 +34,11 @@ export async function GET(
     if (!rows[0]) return new Response("Not found", { status: 404 });
     await requireMembership(rows[0].conversationId, user.id);
 
-    return serveStoredAsset(rows[0].storageKey, rows[0].mimeType);
+    return serveStoredAsset(
+      rows[0].storageKey,
+      rows[0].mimeType,
+      request.headers.get("range"),
+    );
   } catch (error) {
     if (error instanceof HttpError) {
       return new Response(error.message, { status: error.status });

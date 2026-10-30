@@ -53,7 +53,7 @@ export async function POST(
     await requireMembership(group.id, me.id);
 
     const body = await parseJson(request, messageSchema);
-    const message = validateIncomingMessage(body);
+    const message = await validateIncomingMessage(body, me.id);
 
     const result = await insertMessage({
       conversationId: group.id,

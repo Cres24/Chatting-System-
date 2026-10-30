@@ -1,4 +1,3 @@
-import { build } from "esbuild";
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -13,22 +12,4 @@ await copyFile(
   path.join(outDir, "ably.js"),
 );
 
-// The Vercel Blob browser client only ships as CommonJS/ESM; bundle it as a
-// global so the plain-HTML frontend can call `VercelBlob.upload(...)`.
-await build({
-  stdin: {
-    contents: 'export * from "@vercel/blob/client";',
-    resolveDir: root,
-    sourcefile: "blob-entry.js",
-  },
-  bundle: true,
-  format: "iife",
-  globalName: "VercelBlob",
-  platform: "browser",
-  target: ["es2020"],
-  minify: true,
-  outfile: path.join(outDir, "blob.js"),
-  logLevel: "warning",
-});
-
-console.log("Built public/vendor/ably.js and public/vendor/blob.js");
+console.log("Built public/vendor/ably.js");

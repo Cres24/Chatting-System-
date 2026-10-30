@@ -19,7 +19,8 @@ async function loadEnvLocal(): Promise<void> {
 
 async function main(): Promise<void> {
   await loadEnvLocal();
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString =
+    process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set (add it to .env.local).");
   }

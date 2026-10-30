@@ -13,7 +13,7 @@ import { conversations } from "@/lib/db/schema";
 import { HttpError, assertSameOrigin, handle, json, parseJson } from "@/lib/http";
 import { publishToUsers } from "@/lib/realtime";
 import { updateGroupSchema } from "@/lib/schemas";
-import { isAllowedUploadUrl } from "@/lib/storage";
+import { isAllowedStorageKey, requireStoredObject } from "@/lib/storage";
 
 export async function PATCH(
   request: NextRequest,
@@ -41,11 +41,15 @@ export async function PATCH(
         // Unchanged proxy URL.
       } else if (
         body.avatar.startsWith("/uploads/") ||
-        isAllowedUploadUrl(body.avatar)
+        isAllowedStorageKey(body.avatar, "avatars", me.id)
       ) {
+        await requireStoredObject(body.avatar, {
+          scope: "avatars",
+          ownerId: me.id,
+        });
         updates.avatarUrl = body.avatar;
       } else {
-        throw new HttpError(400, "Invalid group avatar URL.");
+        throw new HttpError(400, "Invalid group avatar key.");
       }
     }
 

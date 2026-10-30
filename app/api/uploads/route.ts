@@ -1,44 +1,54 @@
 import type { NextRequest } from "next/server";
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { HttpError, assertSameOrigin, handle, json } from "@/lib/http";
+import { objectStorageEnabled } from "@/lib/env";
+import { HttpError, assertSameOrigin, handle, json, parseJson } from "@/lib/http";
+import {
+  MAX_UPLOAD_BYTES,
+  buildStorageKey,
+  createPresignedUpload,
+  isAllowedUploadMime,
+} from "@/lib/storage";
 
-const MAX_SIZE = 10 * 1024 * 1024;
+const uploadRequestSchema = z.object({
+  scope: z.enum(["media", "avatars"]),
+  content_type: z.string().min(1).max(120),
+  size: z.number().int().nonnegative().max(MAX_UPLOAD_BYTES),
+});
 
 /**
- * Issues short-lived client tokens so browsers upload straight to Vercel Blob.
- * This keeps large files away from the 4.5 MB serverless request limit.
+ * Issues a short-lived presigned S3 PUT URL so browsers upload straight to
+ * Neon Object Storage instead of through the serverless request body limit.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   return handle(async () => {
     assertSameOrigin(request);
     const user = await requireUser();
-    const body = (await request.json()) as HandleUploadBody;
+    if (!objectStorageEnabled()) {
+      throw new HttpError(503, "Object storage is not configured.");
+    }
 
-    const result = await handleUpload({
-      body,
-      request,
-      onBeforeGenerateToken: async (pathname) => {
-        const allowedPrefix =
-          pathname.startsWith(`media/${user.id}/`) ||
-          pathname.startsWith(`avatars/${user.id}/`);
-        if (!allowedPrefix) {
-          throw new HttpError(403, "Upload path is not allowed.");
-        }
+    const body = await parseJson(request, uploadRequestSchema);
+    if (!isAllowedUploadMime(body.content_type)) {
+      throw new HttpError(400, "Only images, audio, and video are supported.");
+    }
+    if (body.size === 0) {
+      throw new HttpError(400, "The file is empty.");
+    }
 
-        return {
-          allowedContentTypes: ["image/*", "audio/*", "video/*"],
-          maximumSizeInBytes: MAX_SIZE,
-          addRandomSuffix: true,
-          tokenPayload: JSON.stringify({ userId: user.id }),
-        };
-      },
-      onUploadCompleted: async () => {
-        // The message/profile row is written by the normal API call afterwards.
-      },
+    const key = buildStorageKey(body.scope, user.id, body.content_type);
+    const { uploadUrl, headers } = await createPresignedUpload(
+      key,
+      body.content_type,
+    );
+
+    return json({
+      key,
+      uploadUrl,
+      headers,
+      mime_type: body.content_type,
+      size: body.size,
     });
-
-    return json(result);
   });
 }
 

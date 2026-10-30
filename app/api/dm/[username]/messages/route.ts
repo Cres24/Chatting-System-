@@ -67,7 +67,7 @@ export async function POST(
     }
 
     const body = await parseJson(request, messageSchema);
-    const message = validateIncomingMessage(body);
+    const message = await validateIncomingMessage(body, me.id);
     const conversationId = await ensureDirectConversation(me.id, target.id);
 
     const result = await insertMessage({

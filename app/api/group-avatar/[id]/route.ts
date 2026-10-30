@@ -8,7 +8,7 @@ import { HttpError } from "@/lib/http";
 import { serveStoredAsset } from "@/lib/storage";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
@@ -27,7 +27,11 @@ export async function GET(
       .limit(1);
 
     if (!rows[0]?.avatarUrl) return new Response("Not found", { status: 404 });
-    return serveStoredAsset(rows[0].avatarUrl);
+    return serveStoredAsset(
+      rows[0].avatarUrl,
+      "",
+      request.headers.get("range"),
+    );
   } catch (error) {
     if (error instanceof HttpError) {
       return new Response(error.message, { status: error.status });

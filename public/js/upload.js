@@ -1,9 +1,9 @@
 /**
  * Uploads for the plain-HTML frontend.
  *
- * - With a Blob store configured, browsers upload directly to Vercel Blob using
- *   a short-lived token from /api/uploads.
- * - In local development without Blob, files go to /api/uploads/dev.
+ * - With Neon Object Storage configured, browsers receive a short-lived
+ *   presigned S3 PUT URL and upload directly to the private bucket.
+ * - In local development without object storage, files go to /api/uploads/dev.
  */
 (function () {
   let configPromise = null;
@@ -38,13 +38,6 @@
     return map[mimeType] || "bin";
   }
 
-  function randomId() {
-    if (window.crypto && typeof window.crypto.randomUUID === "function") {
-      return window.crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  }
-
   /** Converts the legacy FileReader data URLs used by chat.html into a File. */
   function dataUrlToFile(dataUrl, kind) {
     const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl);
@@ -64,27 +57,43 @@
   /**
    * @param {File} file
    * @param {"media"|"avatars"} scope
-   * @returns {Promise<{url: string, mime_type: string, size: number}>}
+   * @returns {Promise<{key: string, mime_type: string, size: number}>}
    */
   async function upload(file, scope) {
     const config = await getConfig();
 
-    if (config.mode === "blob") {
-      if (!window.VercelBlob || typeof window.VercelBlob.upload !== "function") {
-        throw new Error("Upload library failed to load.");
-      }
-      const pathname = `${scope}/${config.userId}/${randomId()}.${extensionFor(file.type)}`;
-      const result = await window.VercelBlob.upload(pathname, file, {
-        access: config.access,
-        handleUploadUrl: "/api/uploads",
-        clientPayload: JSON.stringify({ scope }),
-        onUploadProgress: (event) => {
-          window.dispatchEvent(
-            new CustomEvent("chat-upload-progress", { detail: event }),
-          );
-        },
+    if (config.mode === "s3") {
+      const targetResponse = await fetch("/api/uploads", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          scope,
+          content_type: file.type,
+          size: file.size,
+        }),
       });
-      return { url: result.url, mime_type: file.type, size: file.size };
+      const target = await targetResponse.json().catch(() => ({}));
+      if (!targetResponse.ok) {
+        throw new Error(target.error || "Could not prepare the upload.");
+      }
+
+      const putResponse = await fetch(target.uploadUrl, {
+        method: "PUT",
+        headers: target.headers || { "content-type": file.type },
+        body: file,
+      });
+      if (!putResponse.ok) {
+        throw new Error(
+          `Storage rejected the upload (${putResponse.status}). Check the bucket CORS rules.`,
+        );
+      }
+
+      return {
+        key: target.key,
+        mime_type: file.type,
+        size: file.size,
+      };
     }
 
     if (config.mode === "dev") {
@@ -99,7 +108,7 @@
       if (!response.ok) {
         throw new Error(data.error || "Upload failed.");
       }
-      return { url: data.url, mime_type: data.mimeType, size: data.size };
+      return { key: data.key, mime_type: data.mimeType, size: data.size };
     }
 
     throw new Error("File uploads are not configured on this deployment.");
