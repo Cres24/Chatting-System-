@@ -403,6 +403,19 @@ async def send_json(ws, data: dict):
         except Exception:
             pass
 
+async def push_notification(username: str, kind: str, title: str, body: str, meta: dict = None):
+    """Deliver an event notification to an online user (requests, invites, etc.)."""
+    ws = ONLINE_USERS.get(username)
+    if not ws:
+        return
+    await send_json(ws, {
+        "action": "notification",
+        "kind": kind,
+        "title": title,
+        "body": body,
+        "meta": meta or {}
+    })
+
 async def sync_user_dashboard(username: str):
     ws = ONLINE_USERS.get(username)
     if not ws:
@@ -531,8 +544,16 @@ async def handle_client(websocket):
                 target = data.get("to_user", "").strip()
                 success, msg = add_friend_request(current_user, target)
                 await send_json(websocket, {"action": "alert", "text": msg})
-                if success and target in ONLINE_USERS:
-                    await sync_user_dashboard(target)
+                if success:
+                    await push_notification(
+                        target,
+                        "friend_request",
+                        "New friend request",
+                        f"@{current_user} wants to connect with you",
+                        {"from_user": current_user}
+                    )
+                    if target in ONLINE_USERS:
+                        await sync_user_dashboard(target)
 
             elif action == "accept_friend_request":
                 if not current_user:
@@ -542,6 +563,13 @@ async def handle_client(websocket):
                 await sync_user_dashboard(current_user)
                 if from_user in ONLINE_USERS:
                     await sync_user_dashboard(from_user)
+                await push_notification(
+                    from_user,
+                    "friend_request_accepted",
+                    "Friend request accepted",
+                    f"@{current_user} accepted your friend request",
+                    {"username": current_user}
+                )
 
             elif action == "unfriend":
                 if not current_user:
@@ -582,6 +610,14 @@ async def handle_client(websocket):
                 for member in group_members_list:
                     if member in ONLINE_USERS:
                         await sync_user_dashboard(member)
+                    if member != current_user:
+                        await push_notification(
+                            member,
+                            "group_invite",
+                            "Added to a group",
+                            f'@{current_user} added you to "{name}"',
+                            {"group_id": group_id, "group_name": name}
+                        )
 
             elif action == "load_chat":
                 if not current_user:
@@ -621,12 +657,12 @@ async def handle_client(websocket):
                         await send_json(websocket, {"action": "alert", "text": "Message blocked: communication is not allowed."})
                         continue
 
-                    # Fetch sender avatar
+                    # Fetch sender avatar & display name for notification previews
                     with sqlite3.connect(DB_FILE) as conn:
                         c = conn.cursor()
-                        c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
+                        c.execute("SELECT COALESCE(avatar, ''), COALESCE(full_name, '') FROM users WHERE username = ?", (current_user,))
                         row = c.fetchone()
-                        sender_avatar = row[0] if row else ""
+                        sender_avatar, sender_name = (row[0], row[1]) if row else ("", "")
 
                     save_direct_message(current_user, target_id, text, msg_type)
                     payload = {
@@ -634,6 +670,7 @@ async def handle_client(websocket):
                         "chat_type": "direct",
                         "target_id": current_user,
                         "sender": current_user,
+                        "sender_name": sender_name or current_user,
                         "text": text,
                         "msg_type": msg_type,
                         "avatar": sender_avatar
@@ -652,9 +689,12 @@ async def handle_client(websocket):
 
                     with sqlite3.connect(DB_FILE) as conn:
                         c = conn.cursor()
-                        c.execute("SELECT COALESCE(avatar, '') FROM users WHERE username = ?", (current_user,))
+                        c.execute("SELECT COALESCE(avatar, ''), COALESCE(full_name, '') FROM users WHERE username = ?", (current_user,))
                         row = c.fetchone()
-                        sender_avatar = row[0] if row else ""
+                        sender_avatar, sender_name = (row[0], row[1]) if row else ("", "")
+                        c.execute("SELECT name FROM groups WHERE id = ?", (group_id,))
+                        group_row = c.fetchone()
+                        group_name = group_row[0] if group_row else ""
 
                     save_group_message(group_id, current_user, text, msg_type)
                     payload = {
@@ -662,6 +702,8 @@ async def handle_client(websocket):
                         "chat_type": "group",
                         "target_id": group_id,
                         "sender": current_user,
+                        "sender_name": sender_name or current_user,
+                        "group_name": group_name,
                         "text": text,
                         "msg_type": msg_type,
                         "avatar": sender_avatar
