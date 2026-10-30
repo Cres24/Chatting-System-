@@ -191,6 +191,9 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
+    // Tracks which member's admin options are currently expanded in the group view
+    let expandedMemberUsername = null;
+
     // Notification state
     const BASE_TITLE = document.title;
     const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
@@ -495,6 +498,11 @@
       return div.innerHTML;
     }
 
+    function toggleMemberDropdown(username) {
+      expandedMemberUsername = (expandedMemberUsername === username) ? null : username;
+      showGroupView(cachedGroupMembers);
+    }
+
     function showGroupView(members) {
       cachedGroupMembers = members;
       document.getElementById("social-default-view").classList.add("hidden");
@@ -528,31 +536,47 @@
         const isFriend = friendUsernames.has(member.username);
         const displayName = member.full_name || member.username;
         const isAdmin = member.role === "admin";
+        const canManage = amIAdmin && !isAdmin && !isMe;
+        const isExpanded = expandedMemberUsername === member.username;
 
-        let actions = [];
+        let badges = [];
 
         if (isAdmin) {
-          actions.push(`<span style="font-size: 10px; font-weight: 700; background: rgba(99, 102, 241, 0.2); color: var(--accent); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(99,102,241,0.4);">Admin</span>`);
+          badges.push(`<span style="font-size: 10px; font-weight: 700; background: rgba(99, 102, 241, 0.2); color: var(--accent); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(99,102,241,0.4);">Admin</span>`);
         }
 
         if (isMe) {
-          actions.push(`<span style="font-size: 11px; color: var(--text-muted);">(you)</span>`);
+          badges.push(`<span style="font-size: 11px; color: var(--text-muted);">(you)</span>`);
         } else if (isFriend) {
-          actions.push(`<span style="font-size: 11px; color: var(--online);">Friend</span>`);
+          badges.push(`<span style="font-size: 11px; color: var(--online);">Friend</span>`);
         } else {
-          actions.push(`<button class="btn btn-sm btn-primary" style="padding: 3px 6px; font-size: 10px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`);
+          badges.push(`<button class="btn btn-sm btn-primary" style="padding: 3px 6px; font-size: 10px;" onclick="event.stopPropagation(); sendFriendRequest('${member.username}')">+ Add</button>`);
         }
 
-        // Admin actions for non-admin members
-        if (amIAdmin && !isAdmin && !isMe) {
-          actions.push(`<button class="btn btn-sm btn-secondary" style="padding: 3px 6px; font-size: 10px;" onclick="promoteToAdmin('${member.username}')">Make Admin</button>`);
-          actions.push(`<button class="btn btn-sm btn-secondary" style="padding: 3px 6px; font-size: 10px; color: #ef4444;" onclick="removeMemberFromGroup('${member.username}')">Remove</button>`);
-        }
+        const memberContainer = document.createElement("div");
+        memberContainer.style.display = "flex";
+        memberContainer.style.flexDirection = "column";
+        memberContainer.style.background = isExpanded ? "rgba(255, 255, 255, 0.05)" : "rgba(255, 255, 255, 0.02)";
+        memberContainer.style.borderRadius = "12px";
+        memberContainer.style.marginBottom = "6px";
+        memberContainer.style.border = isExpanded ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent";
+        memberContainer.style.transition = "all 0.15s ease";
 
-        const div = document.createElement("div");
-        div.className = "member-row";
-        div.style.justifyContent = "space-between";
-        div.innerHTML = `
+        // Top Row: Profile Info & Status
+        const topRow = document.createElement("div");
+        topRow.className = "member-row";
+        topRow.style.margin = "0";
+        topRow.style.background = "transparent";
+        topRow.style.cursor = canManage ? "pointer" : "default";
+        topRow.style.justifyContent = "space-between";
+        topRow.title = canManage ? "Click to manage member" : "";
+        topRow.onclick = () => {
+          if (canManage) {
+            toggleMemberDropdown(member.username);
+          }
+        };
+
+        topRow.innerHTML = `
           <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
             <div class="avatar-wrapper" style="width: 34px; height: 34px; flex-shrink: 0;">
               <div class="user-avatar" style="font-size: 12px; overflow: hidden;">${renderAvatarHTML(member.avatar, displayName)}</div>
@@ -563,9 +587,27 @@
               <span class="item-subtitle">@${escapeHtml(member.username)}</span>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 6px;">${actions.join("")}</div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${badges.join("")}
+            ${canManage ? `<span style="font-size: 10px; color: var(--text-muted);">${isExpanded ? "▲" : "▼"}</span>` : ""}
+          </div>
         `;
-        list.appendChild(div);
+        memberContainer.appendChild(topRow);
+
+        // Sub Row: Expandable Admin Options directly underneath their profile
+        if (canManage && isExpanded) {
+          const actionRow = document.createElement("div");
+          actionRow.style.display = "flex";
+          actionRow.style.gap = "8px";
+          actionRow.style.padding = "4px 12px 10px 44px";
+          actionRow.innerHTML = `
+            <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); promoteToAdmin('${member.username}')">Make Admin</button>
+            <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #ef4444;" onclick="event.stopPropagation(); removeMemberFromGroup('${member.username}')">Remove</button>
+          `;
+          memberContainer.appendChild(actionRow);
+        }
+
+        list.appendChild(memberContainer);
       });
     }
 
@@ -766,6 +808,7 @@
 
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
+      expandedMemberUsername = null;
 
       const unreadKey = conversationKey(type, id);
       if (unreadCounts[unreadKey]) {
@@ -831,6 +874,7 @@
 
     function resetActiveChat() {
       activeChat = null;
+      expandedMemberUsername = null;
       document.getElementById("active-chat-avatar-wrapper").style.display = "none";
       document.getElementById("chat-header").textContent = "Select a conversation";
       document.getElementById("chat-subtitle").textContent = "Choose a friend or group from the left";
@@ -1061,7 +1105,7 @@
       checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>Add friends first</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
-        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.full_name || f.username}</label>`;
+        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)}</label>`;
         checklist.appendChild(div);
       });
       document.getElementById("modal").classList.remove("hidden");
