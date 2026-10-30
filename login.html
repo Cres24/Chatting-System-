@@ -34,45 +34,7 @@
     </div>
   </div>
 
-  <script>
-    let socket = new WebSocket("ws://127.0.0.1:8765");
-
-    function showFeedback(msg, isError) {
-      const fb = document.getElementById("feedback");
-      fb.textContent = msg;
-      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
-      fb.classList.remove("hidden");
-    }
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.action === "auth_error") {
-        showFeedback(data.text, true);
-      } else if (data.action === "login_success") {
-        // Store user credentials in session storage for chat.html
-        sessionStorage.setItem("chat_user", JSON.stringify(data.user));
-        window.location.href = "chat.html";
-      }
-    };
-
-    socket.onclose = () => {
-      showFeedback("Cannot connect to server. Ensure server.py is running.", true);
-    };
-
-    function submitLogin() {
-      const identifier = document.getElementById("login-id").value.trim();
-      const password = document.getElementById("login-password").value;
-      if (!identifier || !password) {
-        showFeedback("Please fill in both fields.", true);
-        return;
-      }
-      socket.send(JSON.stringify({ action: "login", identifier, password }));
-    }
-
-    document.getElementById("login-password").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitLogin();
-    });
-  </script>
+  <script src="notifications.js"></script>
   <script>
     let socket = null;
 
@@ -88,6 +50,7 @@
         if (data.action === "auth_error") {
           showFeedback(data.text, true);
         } else if (data.action === "login_success") {
+          // Store user credentials in session storage for chat.html
           sessionStorage.setItem("chat_user", JSON.stringify(data.user));
           window.location.href = "chat.html";
         }
@@ -119,7 +82,26 @@
         return;
       }
 
-      socket.send(JSON.stringify({ action: "login", identifier, password }));
+      const sendLogin = () => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ action: "login", identifier, password }));
+        }
+      };
+
+      // Ask for notification permission while the click gesture is still valid.
+      // Never block login for more than 15s if the prompt is ignored.
+      if (window.ChatNotify && ChatNotify.supported() && ChatNotify.permission() === "default") {
+        let finished = false;
+        const proceed = () => {
+          if (finished) return;
+          finished = true;
+          sendLogin();
+        };
+        setTimeout(proceed, 15000);
+        ChatNotify.requestPermission().then(proceed, proceed);
+      } else {
+        sendLogin();
+      }
     }
 
     document.getElementById("login-password").addEventListener("keydown", (e) => {
@@ -129,7 +111,5 @@
     // Start connection on page load
     connect();
   </script>
-</body>
-</html>
 </body>
 </html>

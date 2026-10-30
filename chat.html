@@ -21,6 +21,7 @@
           <span class="name" id="current-user-fullname"></span>
           <span class="tag">Online • Edit</span>
         </div>
+        <button id="notify-toggle" class="btn btn-secondary btn-icon" title="Enable notifications" onclick="toggleNotifications()">🔕</button>
         <button class="btn btn-secondary btn-icon" title="Edit Profile" onclick="window.location.href='profile.html'">✏️</button>
         <button class="btn btn-secondary btn-icon" title="Log Out" onclick="logout()">✕</button>
       </div>
@@ -59,6 +60,15 @@
         <div id="direct-chat-actions" class="hidden" style="display: flex; gap: 8px;">
           <button class="btn btn-secondary btn-sm" onclick="unfriendActiveChat()">Unfriend</button>
           <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="blockActiveChat()">Block</button>
+        </div>
+      </div>
+
+      <!-- Notification permission banner (only while permission is undecided) -->
+      <div id="notif-banner" class="notif-banner hidden">
+        <span>🔔 Get notified about new messages, requests, and group invites?</span>
+        <div class="notif-banner-actions">
+          <button class="btn btn-secondary btn-sm" onclick="dismissNotificationBanner()">Not now</button>
+          <button class="btn btn-primary btn-sm" onclick="enableNotificationsFromBanner()">Enable</button>
         </div>
       </div>
 
@@ -115,7 +125,10 @@
           <button class="btn btn-primary" onclick="sendFriendRequest()">Send Request</button>
         </div>
 
-        <div class="section-title" style="margin-top: 16px;">Friend Requests</div>
+        <div class="section-title" style="margin-top: 16px;">
+          <span>Friend Requests</span>
+          <span id="request-count-badge" class="unread-badge hidden"></span>
+        </div>
         <div id="requests-list" class="sidebar-scrollable" style="max-height: 140px;"></div>
 
         <div class="section-title" style="margin-top: 16px;">Blocked Users</div>
@@ -139,6 +152,10 @@
     </div>
   </div>
 
+  <!-- In-app toast fallback when browser popups are unavailable or blocked -->
+  <div id="toast-container"></div>
+
+  <script src="notifications.js"></script>
   <script>
     const sessionData = sessionStorage.getItem("chat_user");
     if (!sessionData) {
@@ -155,6 +172,12 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
+    // Notification state
+    const BASE_TITLE = document.title;
+    const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
+    let unreadCounts = {};  // "dm:<username>" / "group:<id>" -> count
+    let notificationsEnabled = false;
+
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
@@ -169,6 +192,222 @@
     // Header Init
     document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
     document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(user.avatar, user.full_name || currentUser);
+
+    // ---------------- NOTIFICATIONS ----------------
+
+    function notificationsAvailable() {
+      return typeof window.ChatNotify !== "undefined" && ChatNotify.supported();
+    }
+
+    function initNotifications() {
+      notificationsEnabled = notificationsAvailable() && ChatNotify.canNotify();
+      updateNotificationButton();
+
+      const banner = document.getElementById("notif-banner");
+      if (!banner) return;
+
+      let dismissed = false;
+      try {
+        dismissed = localStorage.getItem(BANNER_DISMISSED_KEY) === "true";
+      } catch (err) {
+        /* storage unavailable */
+      }
+
+      if (notificationsAvailable() && ChatNotify.permission() === "default" && !dismissed) {
+        banner.classList.remove("hidden");
+      } else {
+        banner.classList.add("hidden");
+      }
+    }
+
+    function updateNotificationButton() {
+      const btn = document.getElementById("notify-toggle");
+      if (!btn) return;
+
+      const granted = notificationsAvailable() && ChatNotify.permission() === "granted";
+      const active = granted && notificationsEnabled;
+      btn.textContent = active ? "🔔" : "🔕";
+      btn.classList.toggle("active", active);
+
+      if (!notificationsAvailable()) {
+        btn.title = "Browser notifications need localhost or HTTPS";
+      } else if (granted) {
+        btn.title = active ? "Notifications on — click to mute" : "Notifications muted — click to enable";
+      } else if (ChatNotify.permission() === "denied") {
+        btn.title = "Notifications blocked in browser settings";
+      } else {
+        btn.title = "Enable browser notifications";
+      }
+    }
+
+    async function toggleNotifications() {
+      if (!notificationsAvailable()) {
+        showToast("Browser notifications need localhost or HTTPS.", "error");
+        return;
+      }
+
+      const current = ChatNotify.permission();
+
+      if (current === "granted") {
+        notificationsEnabled = !notificationsEnabled;
+        ChatNotify.setMuted(!notificationsEnabled);
+        updateNotificationButton();
+        showToast(notificationsEnabled ? "Notifications enabled." : "Notifications muted.", "info");
+        return;
+      }
+
+      if (current === "denied") {
+        showToast("Notifications are blocked. Re-enable them in your browser's site settings.", "error");
+        updateNotificationButton();
+        return;
+      }
+
+      const result = await ChatNotify.requestPermission();
+      notificationsEnabled = ChatNotify.canNotify();
+      updateNotificationButton();
+      hideNotificationBanner();
+
+      if (result === "granted") {
+        showToast("Notifications enabled.", "success");
+      } else if (result === "denied") {
+        showToast("Notifications blocked. Re-enable them in your browser's site settings.", "error");
+      }
+    }
+
+    function enableNotificationsFromBanner() {
+      toggleNotifications();
+    }
+
+    function dismissNotificationBanner() {
+      try {
+        localStorage.setItem(BANNER_DISMISSED_KEY, "true");
+      } catch (err) {
+        /* storage unavailable */
+      }
+      hideNotificationBanner();
+    }
+
+    function hideNotificationBanner() {
+      const banner = document.getElementById("notif-banner");
+      if (banner) banner.classList.add("hidden");
+    }
+
+    function showToast(message, kind = "info") {
+      const container = document.getElementById("toast-container");
+      if (!container) return;
+
+      const toast = document.createElement("div");
+      toast.className = `toast ${kind}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      const remove = () => {
+        if (!toast.isConnected) return;
+        toast.classList.add("leaving");
+        setTimeout(() => toast.remove(), 200);
+      };
+
+      toast.onclick = remove;
+      setTimeout(remove, 4000);
+    }
+
+    function deliverNotification(options, fallbackText) {
+      if (typeof window.ChatNotify === "undefined") {
+        showToast(fallbackText, "message");
+        return;
+      }
+      if (ChatNotify.muted()) return;          // user explicitly muted popups
+      if (ChatNotify.notify(options)) return;  // popup shown
+      showToast(fallbackText, "message");      // blocked / unsupported / failed
+    }
+
+    function conversationKey(chatType, id) {
+      return chatType === "direct" ? `dm:${id}` : `group:${id}`;
+    }
+
+    function renderUnreadBadge(key) {
+      const count = unreadCounts[key] || 0;
+      if (!count) return "";
+      return `<span class="unread-badge">${count > 99 ? "99+" : count}</span>`;
+    }
+
+    function totalUnread() {
+      return Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+    }
+
+    function updateTitle() {
+      const total = totalUnread();
+      document.title = total > 0 ? `(${total}) ${BASE_TITLE}` : BASE_TITLE;
+    }
+
+    function bumpUnread(key) {
+      unreadCounts[key] = (unreadCounts[key] || 0) + 1;
+      renderDashboard();
+      updateTitle();
+    }
+
+    function focusConversation(type, id, name, isOnline, avatar) {
+      try {
+        window.focus();
+      } catch (err) {
+        /* focus may be blocked */
+      }
+
+      if (type === "group") {
+        const group = currentGroups.find(g => String(g.id) === String(id));
+        selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, "");
+      } else {
+        const friend = currentFriends.find(f => f.username === id);
+        selectChat(
+          "direct",
+          id,
+          name || (friend && friend.full_name) || id,
+          friend ? friend.online : !!isOnline,
+          avatar || (friend && friend.avatar) || ""
+        );
+      }
+    }
+
+    function focusRequestsPanel() {
+      try {
+        window.focus();
+      } catch (err) {
+        /* focus may be blocked */
+      }
+      showDefaultSocialView();
+      const list = document.getElementById("requests-list");
+      if (!list) return;
+      list.scrollIntoView({ behavior: "smooth", block: "center" });
+      list.classList.add("flash");
+      setTimeout(() => list.classList.remove("flash"), 1400);
+    }
+
+    function handleServerNotification(data) {
+      const meta = data.meta || {};
+      const keyPart = meta.from_user || meta.username || meta.group_id || "";
+
+      deliverNotification(
+        {
+          title: data.title || "Chat",
+          body: data.body || "",
+          tag: `server:${data.kind || "event"}:${keyPart}`,
+          onclick: () => {
+            if (data.kind === "friend_request") {
+              focusRequestsPanel();
+            } else if (data.kind === "group_invite" && meta.group_id != null) {
+              focusConversation("group", meta.group_id, meta.group_name, true, "");
+            } else {
+              try {
+                window.focus();
+              } catch (err) {
+                /* focus may be blocked */
+              }
+            }
+          }
+        },
+        `${data.title || "Chat"}: ${data.body || ""}`
+      );
+    }
 
     function initWebSocket() {
       socket = new WebSocket("ws://127.0.0.1:8765");
@@ -203,11 +442,16 @@
           }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
+        } else if (data.action === "notification") {
+          handleServerNotification(data);
         }
       };
     }
 
-    window.addEventListener("DOMContentLoaded", initWebSocket);
+    window.addEventListener("DOMContentLoaded", () => {
+      initWebSocket();
+      initNotifications();
+    });
 
     function logout() {
       sessionStorage.removeItem("chat_user");
@@ -275,6 +519,12 @@
     }
 
     function renderDashboard() {
+      const reqBadge = document.getElementById("request-count-badge");
+      if (reqBadge) {
+        reqBadge.textContent = currentRequests.length;
+        reqBadge.classList.toggle("hidden", currentRequests.length === 0);
+      }
+
       // Pending Requests
       const reqList = document.getElementById("requests-list");
       reqList.innerHTML = currentRequests.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>No pending requests</span>";
@@ -322,6 +572,7 @@
               <span class="item-title">${escapeHtml(g.name)}</span>
               <span class="item-subtitle">Group Channel</span>
             </div>
+            ${renderUnreadBadge(`group:${g.id}`)}
           `;
           div.onclick = () => selectChat("group", g.id, g.name, true, "");
           gList.appendChild(div);
@@ -353,6 +604,7 @@
               <span class="item-title">${escapeHtml(f.full_name || f.username)}</span>
               <span class="item-subtitle">${f.online ? 'Online' : 'Offline'}</span>
             </div>
+            ${renderUnreadBadge(`dm:${f.username}`)}
           `;
           fList.appendChild(div);
         });
@@ -365,6 +617,12 @@
 
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
+
+      const unreadKey = conversationKey(type, id);
+      if (unreadCounts[unreadKey]) {
+        delete unreadCounts[unreadKey];
+        updateTitle();
+      }
 
       const avatarWrap = document.getElementById("active-chat-avatar-wrapper");
       const avatarEl = document.getElementById("active-chat-avatar");
@@ -438,12 +696,55 @@
     }
 
     function handleIncomingMessage(msg) {
-      if (!activeChat) return;
-      const isCurrentDirect = activeChat.type === "direct" && msg.chat_type === "direct" && activeChat.id === msg.target_id;
-      const isCurrentGroup = activeChat.type === "group" && msg.chat_type === "group" && activeChat.id === msg.target_id;
+      const isMine = msg.sender === currentUser;
+      const key = conversationKey(msg.chat_type, msg.target_id);
+      const isActive = !!activeChat &&
+        activeChat.type === msg.chat_type &&
+        String(activeChat.id) === String(msg.target_id);
+      const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
-      if (isCurrentDirect || isCurrentGroup) {
+      // Always render into the open conversation, even while the tab is hidden.
+      if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
+      }
+
+      // Never notify for your own messages.
+      if (isMine) return;
+
+      if (!isActive) {
+        bumpUnread(key);
+      }
+
+      // Tab focused on this exact conversation: the message is already visible.
+      if (isActive && isFocused) return;
+
+      const previewText = (typeof window.ChatNotify !== "undefined")
+        ? ChatNotify.preview(msg.msg_type, msg.text)
+        : "New message";
+
+      if (msg.chat_type === "direct") {
+        const friend = currentFriends.find(f => f.username === msg.sender);
+        const displayName = msg.sender_name || (friend && friend.full_name) || msg.sender;
+        const icon = msg.avatar || (friend && friend.avatar) || "";
+
+        deliverNotification({
+          title: displayName,
+          body: previewText,
+          icon: icon,
+          tag: `dm:${msg.sender}`,
+          onclick: () => focusConversation("direct", msg.sender, displayName, friend ? friend.online : false, icon)
+        }, `${displayName}: ${previewText}`);
+      } else {
+        const group = currentGroups.find(g => String(g.id) === String(msg.target_id));
+        const groupName = msg.group_name || (group && group.name) || "Group chat";
+        const senderName = msg.sender_name || msg.sender;
+
+        deliverNotification({
+          title: groupName,
+          body: `${senderName}: ${previewText}`,
+          tag: `group:${msg.target_id}`,
+          onclick: () => focusConversation("group", msg.target_id, groupName, true, "")
+        }, `${groupName} — ${senderName}: ${previewText}`);
       }
     }
 
