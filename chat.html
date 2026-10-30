@@ -56,10 +56,16 @@
             <div class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</div>
           </div>
         </div>
-        <!-- Direct Chat Action Options (Unfriend / Block) -->
+
+        <!-- Direct Chat Actions (Unfriend / Block) -->
         <div id="direct-chat-actions" class="hidden" style="display: flex; gap: 8px;">
           <button class="btn btn-secondary btn-sm" onclick="unfriendActiveChat()">Unfriend</button>
           <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="blockActiveChat()">Block</button>
+        </div>
+
+        <!-- Group Chat Actions (Leave Group) -->
+        <div id="group-chat-actions" class="hidden" style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="leaveActiveGroup()">Leave Group</button>
         </div>
       </div>
 
@@ -175,7 +181,7 @@
     // Notification state
     const BASE_TITLE = document.title;
     const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
-    let unreadCounts = {};  // "dm:<username>" / "group:<id>" -> count
+    let unreadCounts = {};
     let notificationsEnabled = false;
 
     let mediaRecorder = null;
@@ -426,7 +432,13 @@
           currentBlocked = data.blocked || [];
           renderDashboard();
           if (activeChat && activeChat.type === "group") {
-            showGroupView(cachedGroupMembers);
+            // Check if current user is still part of the active group
+            const stillMember = currentGroups.some(g => String(g.id) === String(activeChat.id));
+            if (!stillMember) {
+              resetActiveChat();
+            } else {
+              showGroupView(cachedGroupMembers);
+            }
           }
         } else if (data.action === "alert") {
           alert(data.text);
@@ -436,9 +448,11 @@
             cachedGroupMembers = data.members || [];
             showGroupView(cachedGroupMembers);
             document.getElementById("direct-chat-actions").classList.add("hidden");
+            document.getElementById("group-chat-actions").classList.remove("hidden");
           } else {
             showDefaultSocialView();
             document.getElementById("direct-chat-actions").classList.remove("hidden");
+            document.getElementById("group-chat-actions").classList.add("hidden");
           }
         } else if (data.action === "group_members_updated") {
           if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
@@ -539,6 +553,17 @@
           group_id: activeChat.id,
           target_username: targetUsername
         }));
+      }
+    }
+
+    function leaveActiveGroup() {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Are you sure you want to leave "${activeChat.name}"?`)) {
+        socket.send(JSON.stringify({
+          action: "leave_group",
+          group_id: activeChat.id
+        }));
+        resetActiveChat();
       }
     }
 
@@ -663,11 +688,13 @@
         statusPip.className = "status-dot-pip online";
         document.getElementById("chat-subtitle").textContent = "Loading members...";
         document.getElementById("direct-chat-actions").classList.add("hidden");
+        document.getElementById("group-chat-actions").classList.remove("hidden");
       } else {
         avatarEl.innerHTML = renderAvatarHTML(avatar, name);
         statusPip.className = `status-dot-pip ${isOnline ? 'online' : 'offline'}`;
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
         document.getElementById("direct-chat-actions").classList.remove("hidden");
+        document.getElementById("group-chat-actions").classList.add("hidden");
       }
 
       document.getElementById("chat-header").textContent = name;
@@ -713,9 +740,11 @@
       document.getElementById("chat-header").textContent = "Select a conversation";
       document.getElementById("chat-subtitle").textContent = "Choose a friend or group from the left";
       document.getElementById("direct-chat-actions").classList.add("hidden");
+      document.getElementById("group-chat-actions").classList.add("hidden");
       document.getElementById("message-input").disabled = true;
       document.getElementById("send-btn").disabled = true;
       document.getElementById("chat-box").innerHTML = "";
+      showDefaultSocialView();
     }
 
     function renderChatHistory(messages) {
