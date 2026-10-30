@@ -69,7 +69,7 @@
         </div>
       </div>
 
-      <!-- Notification permission banner (only while permission is undecided) -->
+      <!-- Notification permission banner -->
       <div id="notif-banner" class="notif-banner hidden">
         <span>🔔 Get notified about new messages, requests, and group invites?</span>
         <div class="notif-banner-actions">
@@ -118,9 +118,21 @@
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
         <div class="section-title">
           <span>Group Members</span>
-          <button id="add-member-btn" class="btn btn-secondary btn-sm hidden" onclick="openAddMemberModal()">+ Add</button>
+          <button id="add-member-btn" class="btn btn-secondary btn-sm hidden" onclick="toggleInlineAddMemberCard()">+ Add</button>
         </div>
         <div id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent); margin-top: 2px;"></div>
+
+        <!-- INLINE ADD MEMBER ACCORDION / CARD (Directly below + Add button) -->
+        <div id="inline-add-member-card" class="hidden" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invite Contact</div>
+          <div id="inline-eligible-friends" class="sidebar-scrollable" style="max-height: 95px; gap: 4px;"></div>
+          
+          <div style="display: flex; gap: 6px; margin-top: 4px;">
+            <input type="text" id="inline-add-username-input" class="input-field" placeholder="Or enter username..." style="padding: 6px 10px; font-size: 12px;" />
+            <button class="btn btn-primary btn-sm" onclick="submitInlineAddMember()">Add</button>
+          </div>
+        </div>
+
         <div id="group-members-list" class="sidebar-scrollable" style="flex-grow: 1; margin-top: 10px;"></div>
       </div>
 
@@ -159,26 +171,7 @@
     </div>
   </div>
 
-  <!-- Add Member to Group Modal (Admin Only) -->
-  <div id="add-member-modal" class="hidden">
-    <div id="modal-content">
-      <h3 style="margin-bottom: 6px;">Add Member to Group</h3>
-      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Select from your friends or type a username</p>
-      
-      <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">From Friends:</div>
-      <div id="add-member-friends-list" class="modal-checklist"></div>
-      
-      <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-top: 8px;">Or by username:</div>
-      <input type="text" id="add-member-username-input" class="input-field" placeholder="Username (e.g. alex)" style="width: 100%; margin-top: 6px; margin-bottom: 14px;" />
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <button class="btn btn-secondary" onclick="closeAddMemberModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitAddGroupMember()">Add</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- In-app toast fallback when browser popups are unavailable or blocked -->
+  <!-- In-app toast fallback -->
   <div id="toast-container"></div>
 
   <script src="notifications.js"></script>
@@ -520,11 +513,17 @@
       const meRecord = members.find(m => m.username === currentUser);
       const amIAdmin = meRecord && meRecord.role === "admin";
 
-      // Show/hide the + Add member button depending on admin role
+      // Show/hide the + Add member button depending on admin status
       const addMemberBtn = document.getElementById("add-member-btn");
       if (addMemberBtn) {
         addMemberBtn.classList.toggle("hidden", !amIAdmin);
+        if (!amIAdmin) {
+          document.getElementById("inline-add-member-card").classList.add("hidden");
+        }
       }
+
+      // Refresh candidate friends in inline dropdown if open
+      renderInlineEligibleFriends();
 
       members.forEach(member => {
         const isMe = member.username === currentUser;
@@ -570,55 +569,65 @@
       });
     }
 
-    function openAddMemberModal() {
-      if (!activeChat || activeChat.type !== "group") return;
+    // ---------------- INLINE ADD MEMBER ACCORDION ----------------
 
-      const friendsChecklist = document.getElementById("add-member-friends-list");
-      friendsChecklist.innerHTML = "";
+    function toggleInlineAddMemberCard() {
+      const card = document.getElementById("inline-add-member-card");
+      const isClosed = card.classList.contains("hidden");
+      if (isClosed) {
+        renderInlineEligibleFriends();
+        card.classList.remove("hidden");
+        document.getElementById("inline-add-username-input").focus();
+      } else {
+        card.classList.add("hidden");
+      }
+    }
 
-      // Existing member handles
+    function renderInlineEligibleFriends() {
+      const container = document.getElementById("inline-eligible-friends");
+      if (!container) return;
+      container.innerHTML = "";
+
       const currentMemberUsernames = new Set(cachedGroupMembers.map(m => m.username));
-
-      // Eligible friends not in the group yet
       const eligibleFriends = currentFriends.filter(f => !currentMemberUsernames.has(f.username));
 
       if (eligibleFriends.length === 0) {
-        friendsChecklist.innerHTML = "<span style='color:var(--text-muted); font-size:12px;'>All your friends are already in this group.</span>";
-      } else {
-        eligibleFriends.forEach(f => {
-          const div = document.createElement("div");
-          div.innerHTML = `<label><input type="radio" name="add_member_radio" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)} (@${escapeHtml(f.username)})</label>`;
-          friendsChecklist.appendChild(div);
-        });
-      }
-
-      document.getElementById("add-member-username-input").value = "";
-      document.getElementById("add-member-modal").classList.remove("hidden");
-    }
-
-    function closeAddMemberModal() {
-      document.getElementById("add-member-modal").classList.add("hidden");
-    }
-
-    function submitAddGroupMember() {
-      if (!activeChat || activeChat.type !== "group") return;
-
-      const manualUsername = document.getElementById("add-member-username-input").value.trim();
-      const selectedRadio = document.querySelector("input[name='add_member_radio']:checked");
-      const targetUser = manualUsername || (selectedRadio ? selectedRadio.value : "");
-
-      if (!targetUser) {
-        alert("Please select a friend or type a username to add.");
+        container.innerHTML = "<span style='color:var(--text-muted); font-size:11px;'>No eligible contacts</span>";
         return;
       }
 
+      eligibleFriends.forEach(f => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.justifyContent = "space-between";
+        row.style.padding = "3px 0";
+        row.innerHTML = `
+          <span style="font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapeHtml(f.full_name || f.username)}</span>
+          <button class="btn btn-sm btn-primary" style="padding: 2px 6px; font-size: 10px;" onclick="addSpecificMember('${f.username}')">+ Add</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function addSpecificMember(username) {
+      if (!activeChat || activeChat.type !== "group" || !username) return;
       socket.send(JSON.stringify({
         action: "add_group_member",
         group_id: activeChat.id,
-        target_username: targetUser
+        target_username: username
       }));
+    }
 
-      closeAddMemberModal();
+    function submitInlineAddMember() {
+      const input = document.getElementById("inline-add-username-input");
+      const username = input.value.trim();
+      if (!username) {
+        alert("Please enter a username to add.");
+        return;
+      }
+      addSpecificMember(username);
+      input.value = "";
     }
 
     function promoteToAdmin(targetUsername) {
@@ -646,6 +655,7 @@
     function showDefaultSocialView() {
       document.getElementById("group-info-view").classList.add("hidden");
       document.getElementById("social-default-view").classList.remove("hidden");
+      document.getElementById("inline-add-member-card").classList.add("hidden");
     }
 
     function renderDashboard() {
@@ -1042,7 +1052,7 @@
       checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>Add friends first</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
-        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.full_name || f.username}</label>`;
+        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)}</label>`;
         checklist.appendChild(div);
       });
       document.getElementById("modal").classList.remove("hidden");
@@ -1079,6 +1089,10 @@
 
     document.getElementById("target-username").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendFriendRequest();
+    });
+
+    document.getElementById("inline-add-username-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitInlineAddMember();
     });
   </script>
 </body>
