@@ -104,7 +104,7 @@ def init_db():
             )
         """)
 
-        # Schema Migrations
+        # Migrations
         try:
             c.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
         except sqlite3.OperationalError:
@@ -331,18 +331,21 @@ def create_group(name: str, creator: str, members: list[str]) -> int:
         conn.commit()
         return group_id
 
-def update_group_avatar(group_id: int, requester: str, avatar: str):
+def update_group_info(group_id: int, requester: str, name: str, avatar: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         # Verify requester is an admin in this group
         c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
         row = c.fetchone()
         if not row or row[0] != "admin":
-            return False, "Only group admins can change the group picture."
+            return False, "Only group admins can update group settings."
 
-        c.execute("UPDATE groups SET avatar = ? WHERE id = ?", (avatar, group_id))
+        if not name or not name.strip():
+            return False, "Group name cannot be empty."
+
+        c.execute("UPDATE groups SET name = ?, avatar = ? WHERE id = ?", (name.strip(), avatar, group_id))
         conn.commit()
-        return True, "Group photo updated."
+        return True, "Group settings updated."
 
 def promote_group_member(group_id: int, requester: str, target: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -636,13 +639,14 @@ async def handle_client(websocket):
                         "text": msg
                     })
 
-            elif action == "update_group_avatar":
+            elif action == "update_group_info":
                 if not current_user:
                     continue
                 group_id = int(data.get("group_id"))
+                name = data.get("name", "").strip()
                 avatar = data.get("avatar", "")
 
-                success, msg = update_group_avatar(group_id, current_user, avatar)
+                success, msg = update_group_info(group_id, current_user, name, avatar)
                 await send_json(websocket, {"action": "alert", "text": msg})
 
                 if success:
@@ -651,8 +655,9 @@ async def handle_client(websocket):
                         if m["username"] in ONLINE_USERS:
                             await sync_user_dashboard(m["username"])
                             await send_json(ONLINE_USERS[m["username"]], {
-                                "action": "group_avatar_updated",
+                                "action": "group_info_updated",
                                 "group_id": group_id,
+                                "name": name,
                                 "avatar": avatar
                             })
 

@@ -47,15 +47,17 @@
     <div id="main-chat">
       <div class="chat-topbar">
         <div class="topbar-left">
-          <!-- Clickable group avatar file upload for admins -->
-          <input type="file" id="group-avatar-file-input" accept="image/*" style="display: none;" onchange="handleGroupAvatarUpload(event)" />
-          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;" onclick="triggerGroupAvatarChange()">
+          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;">
             <div class="user-avatar" id="active-chat-avatar">?</div>
             <span class="status-dot-pip" id="active-chat-status-pip"></span>
           </div>
           <div>
             <div class="chat-title" id="chat-header">Select a conversation</div>
-            <div class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</div>
+            <!-- Subtitle and Admin Edit Link -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</span>
+              <button id="edit-group-btn" class="btn btn-sm btn-secondary hidden" style="padding: 1px 6px; font-size: 10px;" onclick="openEditGroupModal()">✏️ Edit</button>
+            </div>
           </div>
         </div>
 
@@ -173,6 +175,32 @@
     </div>
   </div>
 
+  <!-- Edit Group Details Modal (Admins Only) -->
+  <div id="edit-group-modal" class="hidden">
+    <div id="modal-content">
+      <h3 style="margin-bottom: 6px;">Edit Group Settings</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Update group name and profile photo</p>
+      
+      <div style="text-align: center; margin-bottom: 14px;">
+        <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('edit-group-avatar-input').click()" title="Click to change photo">
+          <div id="edit-group-avatar-preview" class="user-avatar" style="width: 64px; height: 64px; font-size: 24px; margin: 0 auto; overflow: hidden; border: 2px solid var(--accent); background: #475569;">#</div>
+          <div style="position: absolute; bottom: 0; right: 0; background: var(--accent); color: #fff; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card-solid);">📷</div>
+        </div>
+        <input type="file" id="edit-group-avatar-input" accept="image/*" style="display: none;" onchange="handleEditGroupAvatarSelected(event)" />
+      </div>
+
+      <div class="field-group" style="margin-bottom: 14px;">
+        <label>Group Name</label>
+        <input type="text" id="edit-group-name-input" class="input-field" placeholder="Group Name" />
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-secondary" onclick="closeEditGroupModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveGroupInfo()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- In-app toast fallback -->
   <div id="toast-container"></div>
 
@@ -194,6 +222,7 @@
     let cachedGroupMembers = [];
 
     let expandedMemberUsername = null;
+    let pendingGroupAvatarBase64 = "";
 
     // Notification state
     const BASE_TITLE = document.title;
@@ -453,7 +482,9 @@
             if (!currentGroupRecord) {
               resetActiveChat();
             } else {
+              activeChat.name = currentGroupRecord.name;
               activeChat.avatar = currentGroupRecord.avatar || "";
+              document.getElementById("chat-header").textContent = activeChat.name;
               updateActiveChatAvatarUI();
               showGroupView(cachedGroupMembers);
             }
@@ -481,12 +512,17 @@
             cachedGroupMembers = data.members || [];
             showGroupView(cachedGroupMembers);
           }
-        } else if (data.action === "group_avatar_updated") {
+        } else if (data.action === "group_info_updated") {
           const targetGroup = currentGroups.find(g => String(g.id) === String(data.group_id));
-          if (targetGroup) targetGroup.avatar = data.avatar;
+          if (targetGroup) {
+            targetGroup.name = data.name;
+            targetGroup.avatar = data.avatar;
+          }
           renderDashboard();
           if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
+            activeChat.name = data.name;
             activeChat.avatar = data.avatar;
+            document.getElementById("chat-header").textContent = data.name;
             updateActiveChatAvatarUI();
           }
         } else if (data.action === "new_message") {
@@ -518,56 +554,77 @@
       showGroupView(cachedGroupMembers);
     }
 
-    // ---------------- GROUP AVATAR UPDATES (ADMIN ONLY) ----------------
+    // ---------------- EDIT GROUP MODAL (NAME & PICTURE) ----------------
 
-    function triggerGroupAvatarChange() {
+    function openEditGroupModal() {
       if (!activeChat || activeChat.type !== "group") return;
-      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
-      if (meRecord && meRecord.role === "admin") {
-        document.getElementById("group-avatar-file-input").click();
+      pendingGroupAvatarBase64 = activeChat.avatar || "";
+      document.getElementById("edit-group-name-input").value = activeChat.name;
+      renderEditGroupAvatarPreview();
+      document.getElementById("edit-group-modal").classList.remove("hidden");
+    }
+
+    function closeEditGroupModal() {
+      document.getElementById("edit-group-modal").classList.add("hidden");
+      pendingGroupAvatarBase64 = "";
+    }
+
+    function renderEditGroupAvatarPreview() {
+      const box = document.getElementById("edit-group-avatar-preview");
+      if (pendingGroupAvatarBase64) {
+        box.innerHTML = `<img src="${pendingGroupAvatarBase64}" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      } else {
+        box.textContent = (activeChat ? activeChat.name : "#").charAt(0).toUpperCase();
       }
     }
 
-    function handleGroupAvatarUpload(event) {
+    function handleEditGroupAvatarSelected(event) {
       const file = event.target.files[0];
-      if (!file || !activeChat || activeChat.type !== "group") return;
+      if (!file) return;
 
       if (file.size > 5 * 1024 * 1024) {
-        alert("Image must be smaller than 5MB.");
+        alert("Image must be under 5MB.");
         event.target.value = "";
         return;
       }
 
       const reader = new FileReader();
       reader.onload = () => {
-        const base64Data = reader.result;
-        socket.send(JSON.stringify({
-          action: "update_group_avatar",
-          group_id: activeChat.id,
-          avatar: base64Data
-        }));
+        pendingGroupAvatarBase64 = reader.result;
+        renderEditGroupAvatarPreview();
       };
       reader.readAsDataURL(file);
       event.target.value = "";
     }
 
+    function saveGroupInfo() {
+      if (!activeChat || activeChat.type !== "group") return;
+      const newName = document.getElementById("edit-group-name-input").value.trim();
+
+      if (!newName) {
+        alert("Group name cannot be empty.");
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        action: "update_group_info",
+        group_id: activeChat.id,
+        name: newName,
+        avatar: pendingGroupAvatarBase64
+      }));
+
+      closeEditGroupModal();
+    }
+
     function updateActiveChatAvatarUI() {
       if (!activeChat) return;
       const avatarEl = document.getElementById("active-chat-avatar");
-      const wrapper = document.getElementById("active-chat-avatar-wrapper");
-      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
-      const amIAdmin = activeChat.type === "group" && meRecord && meRecord.role === "admin";
-
       if (activeChat.type === "group") {
         avatarEl.innerHTML = activeChat.avatar 
           ? `<img src="${activeChat.avatar}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
           : "#";
-        wrapper.style.cursor = amIAdmin ? "pointer" : "default";
-        wrapper.title = amIAdmin ? "Click to change group photo" : "";
       } else {
         avatarEl.innerHTML = renderAvatarHTML(activeChat.avatar, activeChat.name);
-        wrapper.style.cursor = "default";
-        wrapper.title = "";
       }
     }
 
@@ -590,6 +647,12 @@
       const amIAdmin = meRecord && meRecord.role === "admin";
 
       updateActiveChatAvatarUI();
+
+      // Show/hide the Edit button in the header beneath group title
+      const editGroupBtn = document.getElementById("edit-group-btn");
+      if (editGroupBtn) {
+        editGroupBtn.classList.toggle("hidden", !amIAdmin);
+      }
 
       const addMemberBtn = document.getElementById("add-member-btn");
       if (addMemberBtn) {
@@ -775,6 +838,7 @@
       document.getElementById("group-info-view").classList.add("hidden");
       document.getElementById("social-default-view").classList.remove("hidden");
       document.getElementById("inline-add-member-card").classList.add("hidden");
+      document.getElementById("edit-group-btn").classList.add("hidden");
     }
 
     function renderDashboard() {
@@ -902,6 +966,7 @@
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
         document.getElementById("direct-chat-actions").classList.remove("hidden");
         document.getElementById("group-chat-actions").classList.add("hidden");
+        document.getElementById("edit-group-btn").classList.add("hidden");
       }
 
       document.getElementById("chat-header").textContent = name;
@@ -949,6 +1014,7 @@
       document.getElementById("chat-subtitle").textContent = "Choose a friend or group from the left";
       document.getElementById("direct-chat-actions").classList.add("hidden");
       document.getElementById("group-chat-actions").classList.add("hidden");
+      document.getElementById("edit-group-btn").classList.add("hidden");
       document.getElementById("message-input").disabled = true;
       document.getElementById("send-btn").disabled = true;
       document.getElementById("chat-box").innerHTML = "";
