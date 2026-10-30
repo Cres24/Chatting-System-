@@ -118,8 +118,9 @@
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
         <div class="section-title">
           <span>Group Members</span>
-          <span id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent);"></span>
+          <button id="add-member-btn" class="btn btn-secondary btn-sm hidden" onclick="openAddMemberModal()">+ Add</button>
         </div>
+        <div id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent); margin-top: 2px;"></div>
         <div id="group-members-list" class="sidebar-scrollable" style="flex-grow: 1; margin-top: 10px;"></div>
       </div>
 
@@ -154,6 +155,25 @@
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
         <button class="btn btn-secondary" onclick="closeGroupModal()">Cancel</button>
         <button class="btn btn-primary" onclick="createGroup()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Member to Group Modal (Admin Only) -->
+  <div id="add-member-modal" class="hidden">
+    <div id="modal-content">
+      <h3 style="margin-bottom: 6px;">Add Member to Group</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Select from your friends or type a username</p>
+      
+      <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">From Friends:</div>
+      <div id="add-member-friends-list" class="modal-checklist"></div>
+      
+      <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-top: 8px;">Or by username:</div>
+      <input type="text" id="add-member-username-input" class="input-field" placeholder="Username (e.g. alex)" style="width: 100%; margin-top: 6px; margin-bottom: 14px;" />
+
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-secondary" onclick="closeAddMemberModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddGroupMember()">Add</button>
       </div>
     </div>
   </div>
@@ -432,7 +452,6 @@
           currentBlocked = data.blocked || [];
           renderDashboard();
           if (activeChat && activeChat.type === "group") {
-            // Check if current user is still part of the active group
             const stillMember = currentGroups.some(g => String(g.id) === String(activeChat.id));
             if (!stillMember) {
               resetActiveChat();
@@ -501,6 +520,12 @@
       const meRecord = members.find(m => m.username === currentUser);
       const amIAdmin = meRecord && meRecord.role === "admin";
 
+      // Show/hide the + Add member button depending on admin role
+      const addMemberBtn = document.getElementById("add-member-btn");
+      if (addMemberBtn) {
+        addMemberBtn.classList.toggle("hidden", !amIAdmin);
+      }
+
       members.forEach(member => {
         const isMe = member.username === currentUser;
         const isFriend = friendUsernames.has(member.username);
@@ -543,6 +568,57 @@
         `;
         list.appendChild(div);
       });
+    }
+
+    function openAddMemberModal() {
+      if (!activeChat || activeChat.type !== "group") return;
+
+      const friendsChecklist = document.getElementById("add-member-friends-list");
+      friendsChecklist.innerHTML = "";
+
+      // Existing member handles
+      const currentMemberUsernames = new Set(cachedGroupMembers.map(m => m.username));
+
+      // Eligible friends not in the group yet
+      const eligibleFriends = currentFriends.filter(f => !currentMemberUsernames.has(f.username));
+
+      if (eligibleFriends.length === 0) {
+        friendsChecklist.innerHTML = "<span style='color:var(--text-muted); font-size:12px;'>All your friends are already in this group.</span>";
+      } else {
+        eligibleFriends.forEach(f => {
+          const div = document.createElement("div");
+          div.innerHTML = `<label><input type="radio" name="add_member_radio" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)} (@${escapeHtml(f.username)})</label>`;
+          friendsChecklist.appendChild(div);
+        });
+      }
+
+      document.getElementById("add-member-username-input").value = "";
+      document.getElementById("add-member-modal").classList.remove("hidden");
+    }
+
+    function closeAddMemberModal() {
+      document.getElementById("add-member-modal").classList.add("hidden");
+    }
+
+    function submitAddGroupMember() {
+      if (!activeChat || activeChat.type !== "group") return;
+
+      const manualUsername = document.getElementById("add-member-username-input").value.trim();
+      const selectedRadio = document.querySelector("input[name='add_member_radio']:checked");
+      const targetUser = manualUsername || (selectedRadio ? selectedRadio.value : "");
+
+      if (!targetUser) {
+        alert("Please select a friend or type a username to add.");
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        action: "add_group_member",
+        group_id: activeChat.id,
+        target_username: targetUser
+      }));
+
+      closeAddMemberModal();
     }
 
     function promoteToAdmin(targetUsername) {
