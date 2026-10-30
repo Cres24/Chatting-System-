@@ -1,1 +1,24 @@
-__pycache__
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Secrets
+.env
+.env.local
+.env.*.local
+.vercel/
+
+# Legacy data / local databases
+chat.db
+*.sqlite
+*.sqlite3
+
+# Python leftovers
+__pycache__/
+.venv/
+
+# Generated / local-only assets
+public/vendor/
+public/uploads/
+.DS_Store
