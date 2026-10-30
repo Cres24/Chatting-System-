@@ -88,6 +88,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS group_members (
                 group_id INTEGER,
                 username TEXT NOT NULL,
+                role TEXT DEFAULT 'member',
                 PRIMARY KEY (group_id, username)
             )
         """)
@@ -113,6 +114,10 @@ def init_db():
             pass
         try:
             c.execute("ALTER TABLE group_messages ADD COLUMN msg_type TEXT DEFAULT 'text'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE group_members ADD COLUMN role TEXT DEFAULT 'member'")
         except sqlite3.OperationalError:
             pass
 
@@ -314,11 +319,26 @@ def create_group(name: str, creator: str, members: list[str]) -> int:
         c = conn.cursor()
         c.execute("INSERT INTO groups (name, creator) VALUES (?, ?)", (name, creator))
         group_id = c.lastrowid
-        all_members = set(members + [creator])
-        for member in all_members:
-            c.execute("INSERT INTO group_members (group_id, username) VALUES (?, ?)", (group_id, member))
+        # Creator is initialized with the admin role
+        c.execute("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'admin')", (group_id, creator))
+        for member in set(members):
+            if member != creator:
+                c.execute("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')", (group_id, member))
         conn.commit()
         return group_id
+
+def promote_group_member(group_id: int, requester: str, target: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        # Verify requester is an admin of this group
+        c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
+        row = c.fetchone()
+        if not row or row[0] != "admin":
+            return False, "Only group admins can assign new admins."
+
+        c.execute("UPDATE group_members SET role = 'admin' WHERE group_id = ? AND username = ?", (group_id, target))
+        conn.commit()
+        return True, f"@{target} is now an admin."
 
 def get_user_groups(username: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -334,7 +354,7 @@ def get_group_members_with_status(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT gm.username, u.full_name, COALESCE(u.avatar, '')
+            SELECT gm.username, u.full_name, COALESCE(u.avatar, ''), COALESCE(gm.role, 'member')
             FROM group_members gm
             LEFT JOIN users u ON gm.username = u.username
             WHERE gm.group_id = ?
@@ -345,6 +365,7 @@ def get_group_members_with_status(group_id: int):
                 "username": row[0],
                 "full_name": row[1] or row[0],
                 "avatar": row[2],
+                "role": row[3],
                 "online": row[0] in ONLINE_USERS
             }
             for row in rows
@@ -404,7 +425,6 @@ async def send_json(ws, data: dict):
             pass
 
 async def push_notification(username: str, kind: str, title: str, body: str, meta: dict = None):
-    """Deliver an event notification to an online user (requests, invites, etc.)."""
     ws = ONLINE_USERS.get(username)
     if not ws:
         return
@@ -619,6 +639,25 @@ async def handle_client(websocket):
                             {"group_id": group_id, "group_name": name}
                         )
 
+            elif action == "promote_admin":
+                if not current_user:
+                    continue
+                group_id = int(data.get("group_id"))
+                target_user = data.get("target_username")
+
+                success, msg = promote_group_member(group_id, current_user, target_user)
+                await send_json(websocket, {"action": "alert", "text": msg})
+
+                if success:
+                    updated_members = get_group_members_with_status(group_id)
+                    for m in updated_members:
+                        if m["username"] in ONLINE_USERS:
+                            await send_json(ONLINE_USERS[m["username"]], {
+                                "action": "group_members_updated",
+                                "group_id": group_id,
+                                "members": updated_members
+                            })
+
             elif action == "load_chat":
                 if not current_user:
                     continue
@@ -657,7 +696,6 @@ async def handle_client(websocket):
                         await send_json(websocket, {"action": "alert", "text": "Message blocked: communication is not allowed."})
                         continue
 
-                    # Fetch sender avatar & display name for notification previews
                     with sqlite3.connect(DB_FILE) as conn:
                         c = conn.cursor()
                         c.execute("SELECT COALESCE(avatar, ''), COALESCE(full_name, '') FROM users WHERE username = ?", (current_user,))

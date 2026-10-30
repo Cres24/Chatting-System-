@@ -316,9 +316,9 @@
         showToast(fallbackText, "message");
         return;
       }
-      if (ChatNotify.muted()) return;          // user explicitly muted popups
-      if (ChatNotify.notify(options)) return;  // popup shown
-      showToast(fallbackText, "message");      // blocked / unsupported / failed
+      if (ChatNotify.muted()) return;
+      if (ChatNotify.notify(options)) return;
+      showToast(fallbackText, "message");
     }
 
     function conversationKey(chatType, id) {
@@ -440,6 +440,11 @@
             showDefaultSocialView();
             document.getElementById("direct-chat-actions").classList.remove("hidden");
           }
+        } else if (data.action === "group_members_updated") {
+          if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
+            cachedGroupMembers = data.members || [];
+            showGroupView(cachedGroupMembers);
+          }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
         } else if (data.action === "notification") {
@@ -479,18 +484,31 @@
 
       const friendUsernames = new Set(currentFriends.map(f => f.username));
 
+      const meRecord = members.find(m => m.username === currentUser);
+      const amIAdmin = meRecord && meRecord.role === "admin";
+
       members.forEach(member => {
         const isMe = member.username === currentUser;
         const isFriend = friendUsernames.has(member.username);
         const displayName = member.full_name || member.username;
+        const isAdmin = member.role === "admin";
 
-        let actionHtml = "";
+        let actions = [];
+
+        if (isAdmin) {
+          actions.push(`<span style="font-size: 10px; font-weight: 700; background: rgba(99, 102, 241, 0.2); color: var(--accent); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(99,102,241,0.4);">Admin</span>`);
+        }
+
         if (isMe) {
-          actionHtml = `<span style="font-size: 11px; color: var(--accent);">(you)</span>`;
+          actions.push(`<span style="font-size: 11px; color: var(--text-muted);">(you)</span>`);
         } else if (isFriend) {
-          actionHtml = `<span style="font-size: 11px; color: var(--online);">Friend</span>`;
+          actions.push(`<span style="font-size: 11px; color: var(--online);">Friend</span>`);
         } else {
-          actionHtml = `<button class="btn btn-sm btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`;
+          actions.push(`<button class="btn btn-sm btn-primary" style="padding: 3px 6px; font-size: 10px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`);
+        }
+
+        if (amIAdmin && !isAdmin && !isMe) {
+          actions.push(`<button class="btn btn-sm btn-secondary" style="padding: 3px 6px; font-size: 10px;" onclick="promoteToAdmin('${member.username}')">Make Admin</button>`);
         }
 
         const div = document.createElement("div");
@@ -507,10 +525,21 @@
               <span class="item-subtitle">@${escapeHtml(member.username)}</span>
             </div>
           </div>
-          <div>${actionHtml}</div>
+          <div style="display: flex; align-items: center; gap: 6px;">${actions.join("")}</div>
         `;
         list.appendChild(div);
       });
+    }
+
+    function promoteToAdmin(targetUsername) {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Promote @${targetUsername} to admin of this group?`)) {
+        socket.send(JSON.stringify({
+          action: "promote_admin",
+          group_id: activeChat.id,
+          target_username: targetUsername
+        }));
+      }
     }
 
     function showDefaultSocialView() {
@@ -703,19 +732,16 @@
         String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
-      // Always render into the open conversation, even while the tab is hidden.
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
 
-      // Never notify for your own messages.
       if (isMine) return;
 
       if (!isActive) {
         bumpUnread(key);
       }
 
-      // Tab focused on this exact conversation: the message is already visible.
       if (isActive && isFocused) return;
 
       const previewText = (typeof window.ChatNotify !== "undefined")
