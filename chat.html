@@ -47,7 +47,9 @@
     <div id="main-chat">
       <div class="chat-topbar">
         <div class="topbar-left">
-          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;">
+          <!-- Clickable group avatar file upload for admins -->
+          <input type="file" id="group-avatar-file-input" accept="image/*" style="display: none;" onchange="handleGroupAvatarUpload(event)" />
+          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;" onclick="triggerGroupAvatarChange()">
             <div class="user-avatar" id="active-chat-avatar">?</div>
             <span class="status-dot-pip" id="active-chat-status-pip"></span>
           </div>
@@ -56,14 +58,20 @@
             <div class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</div>
           </div>
         </div>
-        <!-- Direct Chat Action Options (Unfriend / Block) -->
+
+        <!-- Direct Chat Actions (Unfriend / Block) -->
         <div id="direct-chat-actions" class="hidden" style="display: flex; gap: 8px;">
           <button class="btn btn-secondary btn-sm" onclick="unfriendActiveChat()">Unfriend</button>
           <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="blockActiveChat()">Block</button>
         </div>
+
+        <!-- Group Chat Actions (Leave Group) -->
+        <div id="group-chat-actions" class="hidden" style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="leaveActiveGroup()">Leave Group</button>
+        </div>
       </div>
 
-      <!-- Notification permission banner (only while permission is undecided) -->
+      <!-- Notification permission banner -->
       <div id="notif-banner" class="notif-banner hidden">
         <span>🔔 Get notified about new messages, requests, and group invites?</span>
         <div class="notif-banner-actions">
@@ -112,8 +120,21 @@
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
         <div class="section-title">
           <span>Group Members</span>
-          <span id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent);"></span>
+          <button id="add-member-btn" class="btn btn-secondary btn-sm hidden" onclick="toggleInlineAddMemberCard()">+ Add</button>
         </div>
+        <div id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent); margin-top: 2px;"></div>
+
+        <!-- Inline Add Member Dropdown -->
+        <div id="inline-add-member-card" class="hidden" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invite Contact</div>
+          <div id="inline-eligible-friends" class="sidebar-scrollable" style="max-height: 95px; gap: 4px;"></div>
+          
+          <div style="display: flex; gap: 6px; margin-top: 4px;">
+            <input type="text" id="inline-add-username-input" class="input-field" placeholder="Or enter username..." style="padding: 6px 10px; font-size: 12px;" />
+            <button class="btn btn-primary btn-sm" onclick="submitInlineAddMember()">Add</button>
+          </div>
+        </div>
+
         <div id="group-members-list" class="sidebar-scrollable" style="flex-grow: 1; margin-top: 10px;"></div>
       </div>
 
@@ -152,7 +173,7 @@
     </div>
   </div>
 
-  <!-- In-app toast fallback when browser popups are unavailable or blocked -->
+  <!-- In-app toast fallback -->
   <div id="toast-container"></div>
 
   <script src="notifications.js"></script>
@@ -172,10 +193,12 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
+    let expandedMemberUsername = null;
+
     // Notification state
     const BASE_TITLE = document.title;
     const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
-    let unreadCounts = {};  // "dm:<username>" / "group:<id>" -> count
+    let unreadCounts = {};
     let notificationsEnabled = false;
 
     let mediaRecorder = null;
@@ -316,9 +339,9 @@
         showToast(fallbackText, "message");
         return;
       }
-      if (ChatNotify.muted()) return;          // user explicitly muted popups
-      if (ChatNotify.notify(options)) return;  // popup shown
-      showToast(fallbackText, "message");      // blocked / unsupported / failed
+      if (ChatNotify.muted()) return;
+      if (ChatNotify.notify(options)) return;
+      showToast(fallbackText, "message");
     }
 
     function conversationKey(chatType, id) {
@@ -355,7 +378,7 @@
 
       if (type === "group") {
         const group = currentGroups.find(g => String(g.id) === String(id));
-        selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, "");
+        selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, avatar || (group && group.avatar) || "");
       } else {
         const friend = currentFriends.find(f => f.username === id);
         selectChat(
@@ -426,7 +449,14 @@
           currentBlocked = data.blocked || [];
           renderDashboard();
           if (activeChat && activeChat.type === "group") {
-            showGroupView(cachedGroupMembers);
+            const currentGroupRecord = currentGroups.find(g => String(g.id) === String(activeChat.id));
+            if (!currentGroupRecord) {
+              resetActiveChat();
+            } else {
+              activeChat.avatar = currentGroupRecord.avatar || "";
+              updateActiveChatAvatarUI();
+              showGroupView(cachedGroupMembers);
+            }
           }
         } else if (data.action === "alert") {
           alert(data.text);
@@ -434,11 +464,30 @@
           renderChatHistory(data.history);
           if (data.chat_type === "group") {
             cachedGroupMembers = data.members || [];
+            if (data.group_avatar !== undefined && activeChat) {
+              activeChat.avatar = data.group_avatar;
+              updateActiveChatAvatarUI();
+            }
             showGroupView(cachedGroupMembers);
             document.getElementById("direct-chat-actions").classList.add("hidden");
+            document.getElementById("group-chat-actions").classList.remove("hidden");
           } else {
             showDefaultSocialView();
             document.getElementById("direct-chat-actions").classList.remove("hidden");
+            document.getElementById("group-chat-actions").classList.add("hidden");
+          }
+        } else if (data.action === "group_members_updated") {
+          if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
+            cachedGroupMembers = data.members || [];
+            showGroupView(cachedGroupMembers);
+          }
+        } else if (data.action === "group_avatar_updated") {
+          const targetGroup = currentGroups.find(g => String(g.id) === String(data.group_id));
+          if (targetGroup) targetGroup.avatar = data.avatar;
+          renderDashboard();
+          if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
+            activeChat.avatar = data.avatar;
+            updateActiveChatAvatarUI();
           }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
@@ -464,6 +513,64 @@
       return div.innerHTML;
     }
 
+    function toggleMemberDropdown(username) {
+      expandedMemberUsername = (expandedMemberUsername === username) ? null : username;
+      showGroupView(cachedGroupMembers);
+    }
+
+    // ---------------- GROUP AVATAR UPDATES (ADMIN ONLY) ----------------
+
+    function triggerGroupAvatarChange() {
+      if (!activeChat || activeChat.type !== "group") return;
+      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
+      if (meRecord && meRecord.role === "admin") {
+        document.getElementById("group-avatar-file-input").click();
+      }
+    }
+
+    function handleGroupAvatarUpload(event) {
+      const file = event.target.files[0];
+      if (!file || !activeChat || activeChat.type !== "group") return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Image must be smaller than 5MB.");
+        event.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result;
+        socket.send(JSON.stringify({
+          action: "update_group_avatar",
+          group_id: activeChat.id,
+          avatar: base64Data
+        }));
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    }
+
+    function updateActiveChatAvatarUI() {
+      if (!activeChat) return;
+      const avatarEl = document.getElementById("active-chat-avatar");
+      const wrapper = document.getElementById("active-chat-avatar-wrapper");
+      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
+      const amIAdmin = activeChat.type === "group" && meRecord && meRecord.role === "admin";
+
+      if (activeChat.type === "group") {
+        avatarEl.innerHTML = activeChat.avatar 
+          ? `<img src="${activeChat.avatar}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
+          : "#";
+        wrapper.style.cursor = amIAdmin ? "pointer" : "default";
+        wrapper.title = amIAdmin ? "Click to change group photo" : "";
+      } else {
+        avatarEl.innerHTML = renderAvatarHTML(activeChat.avatar, activeChat.name);
+        wrapper.style.cursor = "default";
+        wrapper.title = "";
+      }
+    }
+
     function showGroupView(members) {
       cachedGroupMembers = members;
       document.getElementById("social-default-view").classList.add("hidden");
@@ -479,24 +586,66 @@
 
       const friendUsernames = new Set(currentFriends.map(f => f.username));
 
+      const meRecord = members.find(m => m.username === currentUser);
+      const amIAdmin = meRecord && meRecord.role === "admin";
+
+      updateActiveChatAvatarUI();
+
+      const addMemberBtn = document.getElementById("add-member-btn");
+      if (addMemberBtn) {
+        addMemberBtn.classList.toggle("hidden", !amIAdmin);
+        if (!amIAdmin) {
+          document.getElementById("inline-add-member-card").classList.add("hidden");
+        }
+      }
+
+      renderInlineEligibleFriends();
+
       members.forEach(member => {
         const isMe = member.username === currentUser;
         const isFriend = friendUsernames.has(member.username);
         const displayName = member.full_name || member.username;
+        const isAdmin = member.role === "admin";
+        const canManage = amIAdmin && !isAdmin && !isMe;
+        const isExpanded = expandedMemberUsername === member.username;
 
-        let actionHtml = "";
-        if (isMe) {
-          actionHtml = `<span style="font-size: 11px; color: var(--accent);">(you)</span>`;
-        } else if (isFriend) {
-          actionHtml = `<span style="font-size: 11px; color: var(--online);">Friend</span>`;
-        } else {
-          actionHtml = `<button class="btn btn-sm btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`;
+        let badges = [];
+
+        if (isAdmin) {
+          badges.push(`<span style="font-size: 10px; font-weight: 700; background: rgba(99, 102, 241, 0.2); color: var(--accent); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(99,102,241,0.4);">Admin</span>`);
         }
 
-        const div = document.createElement("div");
-        div.className = "member-row";
-        div.style.justifyContent = "space-between";
-        div.innerHTML = `
+        if (isMe) {
+          badges.push(`<span style="font-size: 11px; color: var(--text-muted);">(you)</span>`);
+        } else if (isFriend) {
+          badges.push(`<span style="font-size: 11px; color: var(--online);">Friend</span>`);
+        } else {
+          badges.push(`<button class="btn btn-sm btn-primary" style="padding: 3px 6px; font-size: 10px;" onclick="event.stopPropagation(); sendFriendRequest('${member.username}')">+ Add</button>`);
+        }
+
+        const memberContainer = document.createElement("div");
+        memberContainer.style.display = "flex";
+        memberContainer.style.flexDirection = "column";
+        memberContainer.style.background = isExpanded ? "rgba(255, 255, 255, 0.05)" : "rgba(255, 255, 255, 0.02)";
+        memberContainer.style.borderRadius = "12px";
+        memberContainer.style.marginBottom = "6px";
+        memberContainer.style.border = isExpanded ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent";
+        memberContainer.style.transition = "all 0.15s ease";
+
+        const topRow = document.createElement("div");
+        topRow.className = "member-row";
+        topRow.style.margin = "0";
+        topRow.style.background = "transparent";
+        topRow.style.cursor = canManage ? "pointer" : "default";
+        topRow.style.justifyContent = "space-between";
+        topRow.title = canManage ? "Click to manage member" : "";
+        topRow.onclick = () => {
+          if (canManage) {
+            toggleMemberDropdown(member.username);
+          }
+        };
+
+        topRow.innerHTML = `
           <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
             <div class="avatar-wrapper" style="width: 34px; height: 34px; flex-shrink: 0;">
               <div class="user-avatar" style="font-size: 12px; overflow: hidden;">${renderAvatarHTML(member.avatar, displayName)}</div>
@@ -507,15 +656,125 @@
               <span class="item-subtitle">@${escapeHtml(member.username)}</span>
             </div>
           </div>
-          <div>${actionHtml}</div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${badges.join("")}
+            ${canManage ? `<span style="font-size: 10px; color: var(--text-muted);">${isExpanded ? "▲" : "▼"}</span>` : ""}
+          </div>
         `;
-        list.appendChild(div);
+        memberContainer.appendChild(topRow);
+
+        if (canManage && isExpanded) {
+          const actionRow = document.createElement("div");
+          actionRow.style.display = "flex";
+          actionRow.style.gap = "8px";
+          actionRow.style.padding = "4px 12px 10px 44px";
+          actionRow.innerHTML = `
+            <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); promoteToAdmin('${member.username}')">Make Admin</button>
+            <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #ef4444;" onclick="event.stopPropagation(); removeMemberFromGroup('${member.username}')">Remove</button>
+          `;
+          memberContainer.appendChild(actionRow);
+        }
+
+        list.appendChild(memberContainer);
       });
+    }
+
+    function removeMemberFromGroup(targetUsername) {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Are you sure you want to remove @${targetUsername} from the group?`)) {
+        socket.send(JSON.stringify({
+          action: "remove_group_member",
+          group_id: activeChat.id,
+          target_username: targetUsername
+        }));
+      }
+    }
+
+    function toggleInlineAddMemberCard() {
+      const card = document.getElementById("inline-add-member-card");
+      const isClosed = card.classList.contains("hidden");
+      if (isClosed) {
+        renderInlineEligibleFriends();
+        card.classList.remove("hidden");
+        document.getElementById("inline-add-username-input").focus();
+      } else {
+        card.classList.add("hidden");
+      }
+    }
+
+    function renderInlineEligibleFriends() {
+      const container = document.getElementById("inline-eligible-friends");
+      if (!container) return;
+      container.innerHTML = "";
+
+      const currentMemberUsernames = new Set(cachedGroupMembers.map(m => m.username));
+      const eligibleFriends = currentFriends.filter(f => !currentMemberUsernames.has(f.username));
+
+      if (eligibleFriends.length === 0) {
+        container.innerHTML = "<span style='color:var(--text-muted); font-size:11px;'>No eligible contacts</span>";
+        return;
+      }
+
+      eligibleFriends.forEach(f => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.justifyContent = "space-between";
+        row.style.padding = "3px 0";
+        row.innerHTML = `
+          <span style="font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapeHtml(f.full_name || f.username)}</span>
+          <button class="btn btn-sm btn-primary" style="padding: 2px 6px; font-size: 10px;" onclick="addSpecificMember('${f.username}')">+ Add</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function addSpecificMember(username) {
+      if (!activeChat || activeChat.type !== "group" || !username) return;
+      socket.send(JSON.stringify({
+        action: "add_group_member",
+        group_id: activeChat.id,
+        target_username: username
+      }));
+    }
+
+    function submitInlineAddMember() {
+      const input = document.getElementById("inline-add-username-input");
+      const username = input.value.trim();
+      if (!username) {
+        alert("Please enter a username to add.");
+        return;
+      }
+      addSpecificMember(username);
+      input.value = "";
+    }
+
+    function promoteToAdmin(targetUsername) {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Promote @${targetUsername} to admin of this group?`)) {
+        socket.send(JSON.stringify({
+          action: "promote_admin",
+          group_id: activeChat.id,
+          target_username: targetUsername
+        }));
+      }
+    }
+
+    function leaveActiveGroup() {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Are you sure you want to leave "${activeChat.name}"?`)) {
+        socket.send(JSON.stringify({
+          action: "leave_group",
+          group_id: activeChat.id
+        }));
+        resetActiveChat();
+      }
     }
 
     function showDefaultSocialView() {
       document.getElementById("group-info-view").classList.add("hidden");
       document.getElementById("social-default-view").classList.remove("hidden");
+      document.getElementById("inline-add-member-card").classList.add("hidden");
     }
 
     function renderDashboard() {
@@ -562,11 +821,13 @@
       } else {
         filteredGroups.forEach(g => {
           const div = document.createElement("div");
-          const isActive = activeChat && activeChat.type === "group" && activeChat.id === g.id;
+          const isActive = activeChat && activeChat.type === "group" && String(activeChat.id) === String(g.id);
           div.className = `list-item ${isActive ? 'active' : ''}`;
           div.innerHTML = `
             <div class="avatar-wrapper">
-              <div class="user-avatar" style="background: #475569;">#</div>
+              <div class="user-avatar" style="background: #475569; overflow: hidden;">
+                ${g.avatar ? `<img src="${g.avatar}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />` : '#'}
+              </div>
             </div>
             <div class="item-info">
               <span class="item-title">${escapeHtml(g.name)}</span>
@@ -574,7 +835,7 @@
             </div>
             ${renderUnreadBadge(`group:${g.id}`)}
           `;
-          div.onclick = () => selectChat("group", g.id, g.name, true, "");
+          div.onclick = () => selectChat("group", g.id, g.name, true, g.avatar || "");
           gList.appendChild(div);
         });
       }
@@ -617,6 +878,7 @@
 
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
+      expandedMemberUsername = null;
 
       const unreadKey = conversationKey(type, id);
       if (unreadCounts[unreadKey]) {
@@ -625,20 +887,21 @@
       }
 
       const avatarWrap = document.getElementById("active-chat-avatar-wrapper");
-      const avatarEl = document.getElementById("active-chat-avatar");
       const statusPip = document.getElementById("active-chat-status-pip");
 
       avatarWrap.style.display = "block";
+      updateActiveChatAvatarUI();
+
       if (type === "group") {
-        avatarEl.innerHTML = "#";
         statusPip.className = "status-dot-pip online";
         document.getElementById("chat-subtitle").textContent = "Loading members...";
         document.getElementById("direct-chat-actions").classList.add("hidden");
+        document.getElementById("group-chat-actions").classList.remove("hidden");
       } else {
-        avatarEl.innerHTML = renderAvatarHTML(avatar, name);
         statusPip.className = `status-dot-pip ${isOnline ? 'online' : 'offline'}`;
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
         document.getElementById("direct-chat-actions").classList.remove("hidden");
+        document.getElementById("group-chat-actions").classList.add("hidden");
       }
 
       document.getElementById("chat-header").textContent = name;
@@ -680,13 +943,16 @@
 
     function resetActiveChat() {
       activeChat = null;
+      expandedMemberUsername = null;
       document.getElementById("active-chat-avatar-wrapper").style.display = "none";
       document.getElementById("chat-header").textContent = "Select a conversation";
       document.getElementById("chat-subtitle").textContent = "Choose a friend or group from the left";
       document.getElementById("direct-chat-actions").classList.add("hidden");
+      document.getElementById("group-chat-actions").classList.add("hidden");
       document.getElementById("message-input").disabled = true;
       document.getElementById("send-btn").disabled = true;
       document.getElementById("chat-box").innerHTML = "";
+      showDefaultSocialView();
     }
 
     function renderChatHistory(messages) {
@@ -703,19 +969,16 @@
         String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
-      // Always render into the open conversation, even while the tab is hidden.
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
 
-      // Never notify for your own messages.
       if (isMine) return;
 
       if (!isActive) {
         bumpUnread(key);
       }
 
-      // Tab focused on this exact conversation: the message is already visible.
       if (isActive && isFocused) return;
 
       const previewText = (typeof window.ChatNotify !== "undefined")
@@ -911,7 +1174,7 @@
       checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>Add friends first</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
-        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.full_name || f.username}</label>`;
+        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)}</label>`;
         checklist.appendChild(div);
       });
       document.getElementById("modal").classList.remove("hidden");
@@ -948,6 +1211,10 @@
 
     document.getElementById("target-username").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendFriendRequest();
+    });
+
+    document.getElementById("inline-add-username-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitInlineAddMember();
     });
   </script>
 </body>
