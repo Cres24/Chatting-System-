@@ -1,9 +1,6 @@
 import type { NextRequest } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { requireUser } from "@/lib/auth";
-import { getDb } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { HttpError, assertSameOrigin, handle, json } from "@/lib/http";
 
 const MAX_SIZE = 10 * 1024 * 1024;
