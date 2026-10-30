@@ -203,16 +203,16 @@
   <!-- In-app toast fallback -->
   <div id="toast-container"></div>
 
+  <script src="vendor/ably.js"></script>
+  <script src="vendor/blob.js"></script>
+  <script src="js/upload.js"></script>
+  <script src="js/realtime.js"></script>
+  <script src="js/socket-shim.js"></script>
   <script src="notifications.js"></script>
   <script>
-    const sessionData = sessionStorage.getItem("chat_user");
-    if (!sessionData) {
-      window.location.href = "login.html";
-    }
-    const user = JSON.parse(sessionData || "{}");
-
+    let user = {};
     let socket = null;
-    let currentUser = user.username;
+    let currentUser = "";
     let activeChat = null;
     let currentFriends = [];
     let currentRequests = [];
@@ -240,9 +240,7 @@
       return (nameFallback || "?").charAt(0).toUpperCase();
     }
 
-    // Header Init
-    document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
-    document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(user.avatar, user.full_name || currentUser);
+    // Header is populated after /api/auth/me confirms the cookie session.
 
     // ---------------- NOTIFICATIONS ----------------
 
@@ -461,10 +459,10 @@
     }
 
     function initWebSocket() {
-      socket = new WebSocket("ws://127.0.0.1:8765");
+      socket = createChatSocket();
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ action: "resume_session", username: currentUser }));
+        socket.send(JSON.stringify({ action: "resume_session" }));
       };
 
       socket.onmessage = (event) => {
@@ -532,14 +530,42 @@
       };
     }
 
-    window.addEventListener("DOMContentLoaded", () => {
+    async function bootstrapSession() {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+        if (!response.ok) {
+          window.location.replace("login.html");
+          return;
+        }
+        const data = await response.json();
+        user = data.user;
+        currentUser = user.username;
+        sessionStorage.setItem("chat_user", JSON.stringify(user));
+      } catch (error) {
+        window.location.replace("login.html");
+        return;
+      }
+
+      document.getElementById("current-user-fullname").textContent =
+        user.full_name || currentUser;
+      document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(
+        user.avatar,
+        user.full_name || currentUser,
+      );
+
       initWebSocket();
       initNotifications();
-    });
+    }
+
+    window.addEventListener("DOMContentLoaded", bootstrapSession);
 
     function logout() {
-      sessionStorage.removeItem("chat_user");
-      window.location.href = "login.html";
+      fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" })
+        .catch(() => {})
+        .finally(() => {
+          sessionStorage.removeItem("chat_user");
+          window.location.href = "login.html";
+        });
     }
 
     function escapeHtml(str) {
@@ -948,6 +974,7 @@
 
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
+      if (window.ChatRealtime) window.ChatRealtime.watch(type, id);
       expandedMemberUsername = null;
       document.getElementById("inline-edit-group-panel").classList.add("hidden");
 
@@ -1015,6 +1042,7 @@
 
     function resetActiveChat() {
       activeChat = null;
+      if (window.ChatRealtime) window.ChatRealtime.watch(null);
       expandedMemberUsername = null;
       document.getElementById("active-chat-avatar-wrapper").style.display = "none";
       document.getElementById("chat-header").textContent = "Select a conversation";

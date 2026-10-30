@@ -42,6 +42,11 @@
     </div>
   </div>
 
+  <script src="vendor/ably.js"></script>
+  <script src="vendor/blob.js"></script>
+  <script src="js/upload.js"></script>
+  <script src="js/realtime.js"></script>
+  <script src="js/socket-shim.js"></script>
   <script>
     let socket = null;
 
@@ -54,7 +59,7 @@
 
     function initSocket() {
       // Connect to 127.0.0.1 explicitly
-      socket = new WebSocket("ws://127.0.0.1:8765");
+      socket = createChatSocket();
 
       socket.onopen = () => {
         console.log("WebSocket connected successfully.");
@@ -81,7 +86,7 @@
       };
 
       socket.onclose = () => {
-        showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+        showFeedback("Cannot connect to the server. Please refresh and retry.", true);
       };
     }
 

@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Redirecting...</title>
   <script>
-    const session = sessionStorage.getItem("chat_user");
-    if (session) {
-      window.location.replace("chat.html");
-    } else {
-      window.location.replace("login.html");
-    }
+    (async function () {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+        window.location.replace(response.ok ? "chat.html" : "login.html");
+      } catch (error) {
+        window.location.replace("login.html");
+      }
+    })();
   </script>
 </head>
 <body style="background: #0b0f19;"></body>

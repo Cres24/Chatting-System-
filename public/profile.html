@@ -54,19 +54,37 @@
     <div id="feedback" class="auth-feedback hidden"></div>
   </div>
 
+  <script src="vendor/ably.js"></script>
+  <script src="vendor/blob.js"></script>
+  <script src="js/upload.js"></script>
+  <script src="js/realtime.js"></script>
+  <script src="js/socket-shim.js"></script>
   <script>
-    const sessionData = sessionStorage.getItem("chat_user");
-    if (!sessionData) {
-      window.location.href = "login.html";
+    let user = {};
+    let currentAvatarBase64 = "";
+
+    async function loadSession() {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+        if (!response.ok) {
+          window.location.replace("login.html");
+          return false;
+        }
+        const data = await response.json();
+        user = data.user;
+        sessionStorage.setItem("chat_user", JSON.stringify(user));
+      } catch (error) {
+        window.location.replace("login.html");
+        return false;
+      }
+
+      currentAvatarBase64 = user.avatar || "";
+      document.getElementById("prof-fullname").value = user.full_name || "";
+      document.getElementById("prof-username").value = user.username || "";
+      document.getElementById("prof-email").value = user.email || "";
+      renderAvatarPreview();
+      return true;
     }
-    const user = JSON.parse(sessionData || "{}");
-
-    let currentAvatarBase64 = user.avatar || "";
-
-    // Pre-populate input values and current avatar
-    document.getElementById("prof-fullname").value = user.full_name || "";
-    document.getElementById("prof-username").value = user.username || "";
-    document.getElementById("prof-email").value = user.email || "";
 
     function renderAvatarPreview() {
       const box = document.getElementById("avatar-preview-box");
@@ -106,7 +124,7 @@
     }
 
     function initSocket() {
-      socket = new WebSocket("ws://127.0.0.1:8765");
+      socket = createChatSocket();
 
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -122,7 +140,7 @@
       };
 
       socket.onclose = () => {
-        showFeedback("Cannot connect to server. Ensure server.py is running.", true);
+        showFeedback("Cannot connect to the server. Please refresh and retry.", true);
       };
     }
 
@@ -161,7 +179,9 @@
       }));
     }
 
-    window.addEventListener("DOMContentLoaded", initSocket);
+    loadSession().then((ok) => {
+      if (ok) initSocket();
+    });
   </script>
 </body>
 </html>
