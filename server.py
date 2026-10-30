@@ -81,7 +81,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                creator TEXT NOT NULL
+                creator TEXT NOT NULL,
+                avatar TEXT DEFAULT ''
             )
         """)
         c.execute("""
@@ -106,6 +107,10 @@ def init_db():
         # Schema Migrations
         try:
             c.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE groups ADD COLUMN avatar TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
         try:
@@ -317,7 +322,7 @@ def accept_request(from_user: str, to_user: str):
 def create_group(name: str, creator: str, members: list[str]) -> int:
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO groups (name, creator) VALUES (?, ?)", (name, creator))
+        c.execute("INSERT INTO groups (name, creator, avatar) VALUES (?, ?, '')", (name, creator))
         group_id = c.lastrowid
         c.execute("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'admin')", (group_id, creator))
         for member in set(members):
@@ -325,6 +330,19 @@ def create_group(name: str, creator: str, members: list[str]) -> int:
                 c.execute("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')", (group_id, member))
         conn.commit()
         return group_id
+
+def update_group_avatar(group_id: int, requester: str, avatar: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        # Verify requester is an admin in this group
+        c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
+        row = c.fetchone()
+        if not row or row[0] != "admin":
+            return False, "Only group admins can change the group picture."
+
+        c.execute("UPDATE groups SET avatar = ? WHERE id = ?", (avatar, group_id))
+        conn.commit()
+        return True, "Group photo updated."
 
 def promote_group_member(group_id: int, requester: str, target: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -341,19 +359,16 @@ def promote_group_member(group_id: int, requester: str, target: str):
 def remove_group_member(group_id: int, requester: str, target: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        # Verify requester is an admin in this group
         c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
         req_row = c.fetchone()
         if not req_row or req_row[0] != "admin":
             return False, "Only group admins can remove members."
 
-        # Verify target is actually in the group
         c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, target))
         target_row = c.fetchone()
         if not target_row:
             return False, f"@{target} is not in this group."
 
-        # Prevent removing another admin
         if target_row[0] == "admin":
             return False, "Group admins cannot remove other admins."
 
@@ -407,11 +422,11 @@ def get_user_groups(username: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT g.id, g.name FROM groups g
+            SELECT g.id, g.name, COALESCE(g.avatar, '') FROM groups g
             JOIN group_members gm ON g.id = gm.group_id
             WHERE gm.username = ?
         """, (username,))
-        return [{"id": row[0], "name": row[1]} for row in c.fetchall()]
+        return [{"id": row[0], "name": row[1], "avatar": row[2]} for row in c.fetchall()]
 
 def get_group_members_with_status(group_id: int):
     with sqlite3.connect(DB_FILE) as conn:
@@ -621,6 +636,26 @@ async def handle_client(websocket):
                         "text": msg
                     })
 
+            elif action == "update_group_avatar":
+                if not current_user:
+                    continue
+                group_id = int(data.get("group_id"))
+                avatar = data.get("avatar", "")
+
+                success, msg = update_group_avatar(group_id, current_user, avatar)
+                await send_json(websocket, {"action": "alert", "text": msg})
+
+                if success:
+                    member_data = get_group_members_with_status(group_id)
+                    for m in member_data:
+                        if m["username"] in ONLINE_USERS:
+                            await sync_user_dashboard(m["username"])
+                            await send_json(ONLINE_USERS[m["username"]], {
+                                "action": "group_avatar_updated",
+                                "group_id": group_id,
+                                "avatar": avatar
+                            })
+
             elif action == "send_friend_request":
                 if not current_user:
                     continue
@@ -803,6 +838,7 @@ async def handle_client(websocket):
                 chat_type = data.get("chat_type")
                 target_id = data.get("target_id")
                 members = []
+                group_avatar = ""
 
                 if chat_type == "direct":
                     history = get_direct_history(current_user, target_id)
@@ -810,13 +846,19 @@ async def handle_client(websocket):
                     group_id = int(target_id)
                     history = get_group_history(group_id)
                     members = get_group_members_with_status(group_id)
+                    with sqlite3.connect(DB_FILE) as conn:
+                        c = conn.cursor()
+                        c.execute("SELECT COALESCE(avatar, '') FROM groups WHERE id = ?", (group_id,))
+                        g_row = c.fetchone()
+                        group_avatar = g_row[0] if g_row else ""
 
                 await send_json(websocket, {
                     "action": "chat_history",
                     "chat_type": chat_type,
                     "target_id": target_id,
                     "history": history,
-                    "members": members
+                    "members": members,
+                    "group_avatar": group_avatar
                 })
 
             elif action == "send_message":
@@ -869,9 +911,10 @@ async def handle_client(websocket):
                         c.execute("SELECT COALESCE(avatar, ''), COALESCE(full_name, '') FROM users WHERE username = ?", (current_user,))
                         row = c.fetchone()
                         sender_avatar, sender_name = (row[0], row[1]) if row else ("", "")
-                        c.execute("SELECT name FROM groups WHERE id = ?", (group_id,))
+                        c.execute("SELECT name, COALESCE(avatar, '') FROM groups WHERE id = ?", (group_id,))
                         group_row = c.fetchone()
                         group_name = group_row[0] if group_row else ""
+                        group_avatar = group_row[1] if group_row else ""
 
                     save_group_message(group_id, current_user, text, msg_type)
                     payload = {
@@ -881,6 +924,7 @@ async def handle_client(websocket):
                         "sender": current_user,
                         "sender_name": sender_name or current_user,
                         "group_name": group_name,
+                        "group_avatar": group_avatar,
                         "text": text,
                         "msg_type": msg_type,
                         "avatar": sender_avatar

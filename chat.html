@@ -47,7 +47,9 @@
     <div id="main-chat">
       <div class="chat-topbar">
         <div class="topbar-left">
-          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;">
+          <!-- Clickable group avatar file upload for admins -->
+          <input type="file" id="group-avatar-file-input" accept="image/*" style="display: none;" onchange="handleGroupAvatarUpload(event)" />
+          <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;" onclick="triggerGroupAvatarChange()">
             <div class="user-avatar" id="active-chat-avatar">?</div>
             <span class="status-dot-pip" id="active-chat-status-pip"></span>
           </div>
@@ -191,7 +193,6 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
-    // Tracks which member's admin options are currently expanded in the group view
     let expandedMemberUsername = null;
 
     // Notification state
@@ -377,7 +378,7 @@
 
       if (type === "group") {
         const group = currentGroups.find(g => String(g.id) === String(id));
-        selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, "");
+        selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, avatar || (group && group.avatar) || "");
       } else {
         const friend = currentFriends.find(f => f.username === id);
         selectChat(
@@ -448,10 +449,12 @@
           currentBlocked = data.blocked || [];
           renderDashboard();
           if (activeChat && activeChat.type === "group") {
-            const stillMember = currentGroups.some(g => String(g.id) === String(activeChat.id));
-            if (!stillMember) {
+            const currentGroupRecord = currentGroups.find(g => String(g.id) === String(activeChat.id));
+            if (!currentGroupRecord) {
               resetActiveChat();
             } else {
+              activeChat.avatar = currentGroupRecord.avatar || "";
+              updateActiveChatAvatarUI();
               showGroupView(cachedGroupMembers);
             }
           }
@@ -461,6 +464,10 @@
           renderChatHistory(data.history);
           if (data.chat_type === "group") {
             cachedGroupMembers = data.members || [];
+            if (data.group_avatar !== undefined && activeChat) {
+              activeChat.avatar = data.group_avatar;
+              updateActiveChatAvatarUI();
+            }
             showGroupView(cachedGroupMembers);
             document.getElementById("direct-chat-actions").classList.add("hidden");
             document.getElementById("group-chat-actions").classList.remove("hidden");
@@ -473,6 +480,14 @@
           if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
             cachedGroupMembers = data.members || [];
             showGroupView(cachedGroupMembers);
+          }
+        } else if (data.action === "group_avatar_updated") {
+          const targetGroup = currentGroups.find(g => String(g.id) === String(data.group_id));
+          if (targetGroup) targetGroup.avatar = data.avatar;
+          renderDashboard();
+          if (activeChat && activeChat.type === "group" && String(activeChat.id) === String(data.group_id)) {
+            activeChat.avatar = data.avatar;
+            updateActiveChatAvatarUI();
           }
         } else if (data.action === "new_message") {
           handleIncomingMessage(data);
@@ -503,6 +518,59 @@
       showGroupView(cachedGroupMembers);
     }
 
+    // ---------------- GROUP AVATAR UPDATES (ADMIN ONLY) ----------------
+
+    function triggerGroupAvatarChange() {
+      if (!activeChat || activeChat.type !== "group") return;
+      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
+      if (meRecord && meRecord.role === "admin") {
+        document.getElementById("group-avatar-file-input").click();
+      }
+    }
+
+    function handleGroupAvatarUpload(event) {
+      const file = event.target.files[0];
+      if (!file || !activeChat || activeChat.type !== "group") return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Image must be smaller than 5MB.");
+        event.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result;
+        socket.send(JSON.stringify({
+          action: "update_group_avatar",
+          group_id: activeChat.id,
+          avatar: base64Data
+        }));
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    }
+
+    function updateActiveChatAvatarUI() {
+      if (!activeChat) return;
+      const avatarEl = document.getElementById("active-chat-avatar");
+      const wrapper = document.getElementById("active-chat-avatar-wrapper");
+      const meRecord = cachedGroupMembers.find(m => m.username === currentUser);
+      const amIAdmin = activeChat.type === "group" && meRecord && meRecord.role === "admin";
+
+      if (activeChat.type === "group") {
+        avatarEl.innerHTML = activeChat.avatar 
+          ? `<img src="${activeChat.avatar}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
+          : "#";
+        wrapper.style.cursor = amIAdmin ? "pointer" : "default";
+        wrapper.title = amIAdmin ? "Click to change group photo" : "";
+      } else {
+        avatarEl.innerHTML = renderAvatarHTML(activeChat.avatar, activeChat.name);
+        wrapper.style.cursor = "default";
+        wrapper.title = "";
+      }
+    }
+
     function showGroupView(members) {
       cachedGroupMembers = members;
       document.getElementById("social-default-view").classList.add("hidden");
@@ -520,6 +588,8 @@
 
       const meRecord = members.find(m => m.username === currentUser);
       const amIAdmin = meRecord && meRecord.role === "admin";
+
+      updateActiveChatAvatarUI();
 
       const addMemberBtn = document.getElementById("add-member-btn");
       if (addMemberBtn) {
@@ -562,7 +632,6 @@
         memberContainer.style.border = isExpanded ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid transparent";
         memberContainer.style.transition = "all 0.15s ease";
 
-        // Top Row: Profile Info & Status
         const topRow = document.createElement("div");
         topRow.className = "member-row";
         topRow.style.margin = "0";
@@ -594,7 +663,6 @@
         `;
         memberContainer.appendChild(topRow);
 
-        // Sub Row: Expandable Admin Options directly underneath their profile
         if (canManage && isExpanded) {
           const actionRow = document.createElement("div");
           actionRow.style.display = "flex";
@@ -753,11 +821,13 @@
       } else {
         filteredGroups.forEach(g => {
           const div = document.createElement("div");
-          const isActive = activeChat && activeChat.type === "group" && activeChat.id === g.id;
+          const isActive = activeChat && activeChat.type === "group" && String(activeChat.id) === String(g.id);
           div.className = `list-item ${isActive ? 'active' : ''}`;
           div.innerHTML = `
             <div class="avatar-wrapper">
-              <div class="user-avatar" style="background: #475569;">#</div>
+              <div class="user-avatar" style="background: #475569; overflow: hidden;">
+                ${g.avatar ? `<img src="${g.avatar}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />` : '#'}
+              </div>
             </div>
             <div class="item-info">
               <span class="item-title">${escapeHtml(g.name)}</span>
@@ -765,7 +835,7 @@
             </div>
             ${renderUnreadBadge(`group:${g.id}`)}
           `;
-          div.onclick = () => selectChat("group", g.id, g.name, true, "");
+          div.onclick = () => selectChat("group", g.id, g.name, true, g.avatar || "");
           gList.appendChild(div);
         });
       }
@@ -817,18 +887,17 @@
       }
 
       const avatarWrap = document.getElementById("active-chat-avatar-wrapper");
-      const avatarEl = document.getElementById("active-chat-avatar");
       const statusPip = document.getElementById("active-chat-status-pip");
 
       avatarWrap.style.display = "block";
+      updateActiveChatAvatarUI();
+
       if (type === "group") {
-        avatarEl.innerHTML = "#";
         statusPip.className = "status-dot-pip online";
         document.getElementById("chat-subtitle").textContent = "Loading members...";
         document.getElementById("direct-chat-actions").classList.add("hidden");
         document.getElementById("group-chat-actions").classList.remove("hidden");
       } else {
-        avatarEl.innerHTML = renderAvatarHTML(avatar, name);
         statusPip.className = `status-dot-pip ${isOnline ? 'online' : 'offline'}`;
         document.getElementById("chat-subtitle").textContent = isOnline ? "Active now" : "Offline";
         document.getElementById("direct-chat-actions").classList.remove("hidden");
