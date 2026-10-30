@@ -107,11 +107,14 @@
       clientId: config.userId,
     });
 
+    // Subscribe once. Subscribing inside the "connected" handler would add a
+    // duplicate listener on every reconnect.
+    ablyClient.channels
+      .get(`user:${config.userId}`)
+      .subscribe((message) => emit(message.data));
+
     ablyClient.connection.on("connected", () => {
       stopPolling();
-      ablyClient.channels
-        .get(`user:${config.userId}`)
-        .subscribe((message) => emit(message.data));
     });
 
     ablyClient.connection.on("failed", () => {
