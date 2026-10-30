@@ -103,7 +103,7 @@ def init_db():
             )
         """)
 
-        # Migrations
+        # Schema Migrations
         try:
             c.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
         except sqlite3.OperationalError:
@@ -338,29 +338,46 @@ def promote_group_member(group_id: int, requester: str, target: str):
         conn.commit()
         return True, f"@{target} is now an admin."
 
+def remove_group_member(group_id: int, requester: str, target: str):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        # Verify requester is an admin in this group
+        c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
+        req_row = c.fetchone()
+        if not req_row or req_row[0] != "admin":
+            return False, "Only group admins can remove members."
+
+        # Verify target is actually in the group
+        c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, target))
+        target_row = c.fetchone()
+        if not target_row:
+            return False, f"@{target} is not in this group."
+
+        # Prevent removing another admin
+        if target_row[0] == "admin":
+            return False, "Group admins cannot remove other admins."
+
+        c.execute("DELETE FROM group_members WHERE group_id = ? AND username = ?", (group_id, target))
+        conn.commit()
+        return True, f"@{target} was removed from the group."
+
 def add_group_member(group_id: int, requester: str, target: str):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        # Verify requester is an admin
         c.execute("SELECT role FROM group_members WHERE group_id = ? AND username = ?", (group_id, requester))
         row = c.fetchone()
         if not row or row[0] != "admin":
             return False, "Only group admins can add new members."
 
-        # Verify target user exists
         c.execute("SELECT id FROM users WHERE username = ?", (target,))
         if not c.fetchone():
             return False, f"User @{target} does not exist."
 
-        # Verify target user is not already in the group
         c.execute("SELECT 1 FROM group_members WHERE group_id = ? AND username = ?", (group_id, target))
         if c.fetchone():
             return False, f"@{target} is already a member of this group."
 
         c.execute("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')", (group_id, target))
-        c.execute("SELECT name FROM groups WHERE id = ?", (group_id,))
-        g_row = c.fetchone()
-        group_name = g_row[0] if g_row else "the group"
         conn.commit()
         return True, f"@{target} was added to the group."
 
@@ -704,6 +721,28 @@ async def handle_client(websocket):
                                 "members": updated_members
                             })
 
+            elif action == "remove_group_member":
+                if not current_user:
+                    continue
+                group_id = int(data.get("group_id"))
+                target_user = data.get("target_username")
+
+                success, msg = remove_group_member(group_id, current_user, target_user)
+                await send_json(websocket, {"action": "alert", "text": msg})
+
+                if success:
+                    if target_user in ONLINE_USERS:
+                        await sync_user_dashboard(target_user)
+
+                    updated_members = get_group_members_with_status(group_id)
+                    for m in updated_members:
+                        if m["username"] in ONLINE_USERS:
+                            await send_json(ONLINE_USERS[m["username"]], {
+                                "action": "group_members_updated",
+                                "group_id": group_id,
+                                "members": updated_members
+                            })
+
             elif action == "add_group_member":
                 if not current_user:
                     continue
@@ -714,11 +753,9 @@ async def handle_client(websocket):
                 await send_json(websocket, {"action": "alert", "text": msg})
 
                 if success:
-                    # Sync dashboard for the newly added user
                     if target_user in ONLINE_USERS:
                         await sync_user_dashboard(target_user)
                     
-                    # Fetch group name for invite notification
                     with sqlite3.connect(DB_FILE) as conn:
                         c = conn.cursor()
                         c.execute("SELECT name FROM groups WHERE id = ?", (group_id,))
@@ -733,7 +770,6 @@ async def handle_client(websocket):
                         {"group_id": group_id, "group_name": g_name}
                     )
 
-                    # Broadcast refreshed membership to all current participants
                     updated_members = get_group_members_with_status(group_id)
                     for m in updated_members:
                         if m["username"] in ONLINE_USERS:

@@ -122,7 +122,7 @@
         </div>
         <div id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent); margin-top: 2px;"></div>
 
-        <!-- INLINE ADD MEMBER ACCORDION / CARD (Directly below + Add button) -->
+        <!-- Inline Add Member Dropdown -->
         <div id="inline-add-member-card" class="hidden" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
           <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invite Contact</div>
           <div id="inline-eligible-friends" class="sidebar-scrollable" style="max-height: 95px; gap: 4px;"></div>
@@ -513,7 +513,6 @@
       const meRecord = members.find(m => m.username === currentUser);
       const amIAdmin = meRecord && meRecord.role === "admin";
 
-      // Show/hide the + Add member button depending on admin status
       const addMemberBtn = document.getElementById("add-member-btn");
       if (addMemberBtn) {
         addMemberBtn.classList.toggle("hidden", !amIAdmin);
@@ -522,7 +521,6 @@
         }
       }
 
-      // Refresh candidate friends in inline dropdown if open
       renderInlineEligibleFriends();
 
       members.forEach(member => {
@@ -545,8 +543,10 @@
           actions.push(`<button class="btn btn-sm btn-primary" style="padding: 3px 6px; font-size: 10px;" onclick="sendFriendRequest('${member.username}')">+ Add</button>`);
         }
 
+        // Admin actions for non-admin members
         if (amIAdmin && !isAdmin && !isMe) {
           actions.push(`<button class="btn btn-sm btn-secondary" style="padding: 3px 6px; font-size: 10px;" onclick="promoteToAdmin('${member.username}')">Make Admin</button>`);
+          actions.push(`<button class="btn btn-sm btn-secondary" style="padding: 3px 6px; font-size: 10px; color: #ef4444;" onclick="removeMemberFromGroup('${member.username}')">Remove</button>`);
         }
 
         const div = document.createElement("div");
@@ -569,7 +569,16 @@
       });
     }
 
-    // ---------------- INLINE ADD MEMBER ACCORDION ----------------
+    function removeMemberFromGroup(targetUsername) {
+      if (!activeChat || activeChat.type !== "group") return;
+      if (confirm(`Are you sure you want to remove @${targetUsername} from the group?`)) {
+        socket.send(JSON.stringify({
+          action: "remove_group_member",
+          group_id: activeChat.id,
+          target_username: targetUsername
+        }));
+      }
+    }
 
     function toggleInlineAddMemberCard() {
       const card = document.getElementById("inline-add-member-card");
@@ -1052,7 +1061,7 @@
       checklist.innerHTML = currentFriends.length ? "" : "<span style='color:var(--text-muted); font-size:12px;'>Add friends first</span>";
       currentFriends.forEach(f => {
         const div = document.createElement("div");
-        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${escapeHtml(f.full_name || f.username)}</label>`;
+        div.innerHTML = `<label><input type="checkbox" value="${f.username}" /> ${f.full_name || f.username}</label>`;
         checklist.appendChild(div);
       });
       document.getElementById("modal").classList.remove("hidden");
