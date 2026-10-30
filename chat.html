@@ -45,7 +45,7 @@
 
     <!-- PANEL 2: CENTER CHAT -->
     <div id="main-chat">
-      <div class="chat-topbar">
+      <div class="chat-topbar" style="position: relative; z-index: 20;">
         <div class="topbar-left">
           <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none;">
             <div class="user-avatar" id="active-chat-avatar">?</div>
@@ -56,7 +56,7 @@
             <!-- Subtitle and Admin Edit Link -->
             <div style="display: flex; align-items: center; gap: 8px;">
               <span class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</span>
-              <button id="edit-group-btn" class="btn btn-sm btn-secondary hidden" style="padding: 1px 6px; font-size: 10px;" onclick="openEditGroupModal()">✏️ Edit</button>
+              <button id="edit-group-btn" class="btn btn-sm btn-secondary hidden" style="padding: 1px 6px; font-size: 10px;" onclick="toggleInlineEditGroupPanel()">✏️ Edit</button>
             </div>
           </div>
         </div>
@@ -70,6 +70,31 @@
         <!-- Group Chat Actions (Leave Group) -->
         <div id="group-chat-actions" class="hidden" style="display: flex; gap: 8px;">
           <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="leaveActiveGroup()">Leave Group</button>
+        </div>
+
+        <!-- INLINE EDIT GROUP PANEL (Appears directly beneath the Edit button in the top bar) -->
+        <div id="inline-edit-group-panel" class="hidden" style="position: absolute; top: calc(100% + 8px); left: 20px; width: 320px; background: var(--bg-card-solid); border: 1px solid var(--border); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-float); display: flex; flex-direction: column; gap: 10px; z-index: 30;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Edit Group Settings</span>
+            <button class="btn btn-secondary btn-icon" style="padding: 2px 6px; font-size: 11px;" onclick="toggleInlineEditGroupPanel()">✕</button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px;">
+            <div style="position: relative; display: inline-block; cursor: pointer; flex-shrink: 0;" onclick="document.getElementById('edit-group-avatar-input').click()" title="Click to change photo">
+              <div id="inline-group-avatar-preview" class="user-avatar" style="width: 46px; height: 46px; font-size: 18px; overflow: hidden; border: 2px solid var(--accent); background: #475569;">#</div>
+              <div style="position: absolute; bottom: -2px; right: -2px; background: var(--accent); color: #fff; width: 16px; height: 16px; border-radius: 50%; font-size: 9px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--bg-card-solid);">📷</div>
+            </div>
+            <input type="file" id="edit-group-avatar-input" accept="image/*" style="display: none;" onchange="handleInlineGroupAvatarSelected(event)" />
+
+            <div style="flex-grow: 1;">
+              <input type="text" id="inline-group-name-input" class="input-field" placeholder="Group name" style="padding: 6px 10px; font-size: 13px;" />
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px;">
+            <button class="btn btn-secondary btn-sm" onclick="toggleInlineEditGroupPanel()">Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick="saveInlineGroupInfo()">Save</button>
+          </div>
         </div>
       </div>
 
@@ -171,32 +196,6 @@
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
         <button class="btn btn-secondary" onclick="closeGroupModal()">Cancel</button>
         <button class="btn btn-primary" onclick="createGroup()">Create</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Edit Group Details Modal (Admins Only) -->
-  <div id="edit-group-modal" class="hidden">
-    <div id="modal-content">
-      <h3 style="margin-bottom: 6px;">Edit Group Settings</h3>
-      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Update group name and profile photo</p>
-      
-      <div style="text-align: center; margin-bottom: 14px;">
-        <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('edit-group-avatar-input').click()" title="Click to change photo">
-          <div id="edit-group-avatar-preview" class="user-avatar" style="width: 64px; height: 64px; font-size: 24px; margin: 0 auto; overflow: hidden; border: 2px solid var(--accent); background: #475569;">#</div>
-          <div style="position: absolute; bottom: 0; right: 0; background: var(--accent); color: #fff; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card-solid);">📷</div>
-        </div>
-        <input type="file" id="edit-group-avatar-input" accept="image/*" style="display: none;" onchange="handleEditGroupAvatarSelected(event)" />
-      </div>
-
-      <div class="field-group" style="margin-bottom: 14px;">
-        <label>Group Name</label>
-        <input type="text" id="edit-group-name-input" class="input-field" placeholder="Group Name" />
-      </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <button class="btn btn-secondary" onclick="closeEditGroupModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveGroupInfo()">Save</button>
       </div>
     </div>
   </div>
@@ -554,23 +553,26 @@
       showGroupView(cachedGroupMembers);
     }
 
-    // ---------------- EDIT GROUP MODAL (NAME & PICTURE) ----------------
+    // ---------------- INLINE EDIT GROUP PANEL ----------------
 
-    function openEditGroupModal() {
-      if (!activeChat || activeChat.type !== "group") return;
-      pendingGroupAvatarBase64 = activeChat.avatar || "";
-      document.getElementById("edit-group-name-input").value = activeChat.name;
-      renderEditGroupAvatarPreview();
-      document.getElementById("edit-group-modal").classList.remove("hidden");
+    function toggleInlineEditGroupPanel() {
+      const panel = document.getElementById("inline-edit-group-panel");
+      const isClosed = panel.classList.contains("hidden");
+
+      if (isClosed && activeChat && activeChat.type === "group") {
+        pendingGroupAvatarBase64 = activeChat.avatar || "";
+        document.getElementById("inline-group-name-input").value = activeChat.name;
+        renderInlineGroupAvatarPreview();
+        panel.classList.remove("hidden");
+        document.getElementById("inline-group-name-input").focus();
+      } else {
+        panel.classList.add("hidden");
+        pendingGroupAvatarBase64 = "";
+      }
     }
 
-    function closeEditGroupModal() {
-      document.getElementById("edit-group-modal").classList.add("hidden");
-      pendingGroupAvatarBase64 = "";
-    }
-
-    function renderEditGroupAvatarPreview() {
-      const box = document.getElementById("edit-group-avatar-preview");
+    function renderInlineGroupAvatarPreview() {
+      const box = document.getElementById("inline-group-avatar-preview");
       if (pendingGroupAvatarBase64) {
         box.innerHTML = `<img src="${pendingGroupAvatarBase64}" style="width: 100%; height: 100%; object-fit: cover;" />`;
       } else {
@@ -578,7 +580,7 @@
       }
     }
 
-    function handleEditGroupAvatarSelected(event) {
+    function handleInlineGroupAvatarSelected(event) {
       const file = event.target.files[0];
       if (!file) return;
 
@@ -591,15 +593,15 @@
       const reader = new FileReader();
       reader.onload = () => {
         pendingGroupAvatarBase64 = reader.result;
-        renderEditGroupAvatarPreview();
+        renderInlineGroupAvatarPreview();
       };
       reader.readAsDataURL(file);
       event.target.value = "";
     }
 
-    function saveGroupInfo() {
+    function saveInlineGroupInfo() {
       if (!activeChat || activeChat.type !== "group") return;
-      const newName = document.getElementById("edit-group-name-input").value.trim();
+      const newName = document.getElementById("inline-group-name-input").value.trim();
 
       if (!newName) {
         alert("Group name cannot be empty.");
@@ -613,7 +615,7 @@
         avatar: pendingGroupAvatarBase64
       }));
 
-      closeEditGroupModal();
+      toggleInlineEditGroupPanel();
     }
 
     function updateActiveChatAvatarUI() {
@@ -648,10 +650,13 @@
 
       updateActiveChatAvatarUI();
 
-      // Show/hide the Edit button in the header beneath group title
+      // Show/hide the Edit button in header
       const editGroupBtn = document.getElementById("edit-group-btn");
       if (editGroupBtn) {
         editGroupBtn.classList.toggle("hidden", !amIAdmin);
+        if (!amIAdmin) {
+          document.getElementById("inline-edit-group-panel").classList.add("hidden");
+        }
       }
 
       const addMemberBtn = document.getElementById("add-member-btn");
@@ -839,6 +844,7 @@
       document.getElementById("social-default-view").classList.remove("hidden");
       document.getElementById("inline-add-member-card").classList.add("hidden");
       document.getElementById("edit-group-btn").classList.add("hidden");
+      document.getElementById("inline-edit-group-panel").classList.add("hidden");
     }
 
     function renderDashboard() {
@@ -943,6 +949,7 @@
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
       expandedMemberUsername = null;
+      document.getElementById("inline-edit-group-panel").classList.add("hidden");
 
       const unreadKey = conversationKey(type, id);
       if (unreadCounts[unreadKey]) {
@@ -1015,6 +1022,7 @@
       document.getElementById("direct-chat-actions").classList.add("hidden");
       document.getElementById("group-chat-actions").classList.add("hidden");
       document.getElementById("edit-group-btn").classList.add("hidden");
+      document.getElementById("inline-edit-group-panel").classList.add("hidden");
       document.getElementById("message-input").disabled = true;
       document.getElementById("send-btn").disabled = true;
       document.getElementById("chat-box").innerHTML = "";
@@ -1281,6 +1289,10 @@
 
     document.getElementById("inline-add-username-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitInlineAddMember();
+    });
+
+    document.getElementById("inline-group-name-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveInlineGroupInfo();
     });
   </script>
 </body>
