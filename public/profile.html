@@ -3,55 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Edit Profile - Real-Time Chat</title>
+  <title>Edit Profile</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-  <div class="auth-card">
+  <div class="auth-card" style="max-width: 460px;">
     <div class="auth-header">
-      <!-- Clickable Avatar Preview -->
-      <div style="position: relative; display: inline-block; cursor: pointer; margin-bottom: 12px;" onclick="document.getElementById('avatar-file-input').click()" title="Click to change photo">
-        <div id="avatar-preview-box" class="user-avatar" style="width: 72px; height: 72px; font-size: 26px; margin: 0 auto; overflow: hidden; border: 2px solid var(--accent);">?</div>
-        <div style="position: absolute; bottom: 0; right: 0; background: var(--accent); color: #fff; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card-solid);">📷</div>
+      <div style="position: relative; display: inline-block; cursor: pointer; margin-bottom: 10px;" onclick="document.getElementById('avatar-file-input').click()" title="Click to upload profile photo">
+        <div id="profile-avatar-preview" class="user-avatar" style="width: 72px; height: 72px; font-size: 26px; margin: 0 auto; overflow: hidden; border: 2px solid var(--accent);">?</div>
+        <div style="position: absolute; bottom: 0; right: 0; background: var(--accent); color: #fff; width: 24px; height: 24px; border-radius: 50%; font-size: 11px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card-solid);">📷</div>
       </div>
       <input type="file" id="avatar-file-input" accept="image/*" style="display: none;" onchange="handleAvatarSelected(event)" />
-
+      
       <h2>Edit Profile</h2>
-      <p>Update your photo and account details</p>
+      <p>Update your credentials and account details</p>
     </div>
 
-    <div class="auth-fields">
-      <div class="field-group">
-        <label>Full Name</label>
-        <input type="text" id="prof-fullname" class="input-field" placeholder="Full Name" />
+    <form id="profile-form" onsubmit="handleSaveProfile(event)">
+      <div class="auth-fields">
+        <div class="field-group">
+          <label for="prof-fullname">Full Name</label>
+          <input type="text" id="prof-fullname" class="input-field" required />
+        </div>
+
+        <div class="field-group">
+          <label for="prof-username">Username</label>
+          <input type="text" id="prof-username" class="input-field" required />
+        </div>
+
+        <div class="field-group">
+          <label for="prof-email">Email Address</label>
+          <input type="email" id="prof-email" class="input-field" required />
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 6px 0;" />
+
+        <div class="field-group">
+          <label for="prof-new-password">New Password (leave empty to keep current)</label>
+          <input type="password" id="prof-new-password" class="input-field" placeholder="Optional new password" />
+        </div>
+
+        <!-- Confirm New Password Field -->
+        <div class="field-group" id="confirm-password-group">
+          <label for="prof-confirm-password">Confirm New Password</label>
+          <input type="password" id="prof-confirm-password" class="input-field" placeholder="Re-enter new password" />
+        </div>
+
+        <div class="field-group">
+          <label for="prof-current-password">Current Password (required to save changes)</label>
+          <input type="password" id="prof-current-password" class="input-field" placeholder="Enter current password" required />
+        </div>
+
+        <div id="profile-feedback" class="auth-feedback hidden"></div>
+
+        <div style="display: flex; gap: 10px; margin-top: 8px;">
+          <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="window.location.href='chat.html'">Cancel</button>
+          <button type="submit" id="save-btn" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+        </div>
       </div>
-
-      <div class="field-group">
-        <label>Username</label>
-        <input type="text" id="prof-username" class="input-field" placeholder="Username" />
-      </div>
-
-      <div class="field-group">
-        <label>Email Address</label>
-        <input type="email" id="prof-email" class="input-field" placeholder="Email Address" />
-      </div>
-
-      <div class="field-group">
-        <label>New Password (leave blank to keep current)</label>
-        <input type="password" id="prof-new-password" class="input-field" placeholder="••••••••" />
-      </div>
-
-      <div class="field-group">
-        <label style="color: #f87171;">Current Password (required to save changes)</label>
-        <input type="password" id="prof-current-password" class="input-field" placeholder="••••••••" />
-      </div>
-
-      <button class="btn btn-primary" onclick="submitProfileUpdate()">Save Changes</button>
-      <button class="btn btn-secondary" onclick="window.location.href='chat.html'">Back to Chat</button>
-    </div>
-
-    <div id="feedback" class="auth-feedback hidden"></div>
+    </form>
   </div>
 
   <script src="vendor/ably.js"></script>
@@ -59,128 +70,154 @@
   <script src="js/realtime.js"></script>
   <script src="js/socket-shim.js"></script>
   <script>
-    let user = {};
-    let currentAvatarBase64 = "";
+    let currentUser = {};
+    let socket = null;
+    let pendingAvatarBase64 = "";
 
-    async function loadSession() {
-      try {
-        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
-        if (!response.ok) {
-          window.location.replace("login.html");
-          return false;
-        }
-        const data = await response.json();
-        user = data.user;
-        sessionStorage.setItem("chat_user", JSON.stringify(user));
-      } catch (error) {
-        window.location.replace("login.html");
-        return false;
-      }
-
-      currentAvatarBase64 = user.avatar || "";
-      document.getElementById("prof-fullname").value = user.full_name || "";
-      document.getElementById("prof-username").value = user.username || "";
-      document.getElementById("prof-email").value = user.email || "";
-      renderAvatarPreview();
-      return true;
+    function showFeedback(msg, isError = true) {
+      const el = document.getElementById("profile-feedback");
+      el.textContent = msg;
+      el.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      el.classList.remove("hidden");
     }
 
     function renderAvatarPreview() {
-      const box = document.getElementById("avatar-preview-box");
-      if (currentAvatarBase64) {
-        box.innerHTML = `<img src="${currentAvatarBase64}" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      const preview = document.getElementById("profile-avatar-preview");
+      if (pendingAvatarBase64) {
+        preview.innerHTML = `<img src="${pendingAvatarBase64}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`;
       } else {
-        box.textContent = (user.full_name || user.username || "?").charAt(0).toUpperCase();
+        preview.textContent = (currentUser.full_name || currentUser.username || "?").charAt(0).toUpperCase();
       }
     }
-    renderAvatarPreview();
 
     function handleAvatarSelected(event) {
       const file = event.target.files[0];
       if (!file) return;
 
       if (file.size > 5 * 1024 * 1024) {
-        showFeedback("Profile picture must be under 5MB.", true);
-        event.target.value = "";
+        showFeedback("Avatar image must be under 5MB.", true);
         return;
       }
 
       const reader = new FileReader();
       reader.onload = () => {
-        currentAvatarBase64 = reader.result;
+        pendingAvatarBase64 = reader.result;
         renderAvatarPreview();
       };
       reader.readAsDataURL(file);
     }
 
-    let socket = null;
-
-    function showFeedback(msg, isError) {
-      const fb = document.getElementById("feedback");
-      fb.textContent = msg;
-      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
-      fb.classList.remove("hidden");
-    }
-
     function initSocket() {
       socket = createChatSocket();
 
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ action: "resume_session" }));
+      };
+
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.action === "profile_error") {
-          showFeedback(data.text, true);
-        } else if (data.action === "profile_success") {
+        if (data.action === "profile_success") {
           sessionStorage.setItem("chat_user", JSON.stringify(data.user));
-          showFeedback("Profile updated! Returning to chat...", false);
+          showFeedback("Profile updated successfully! Returning to chat...", false);
           setTimeout(() => {
             window.location.href = "chat.html";
-          }, 1000);
+          }, 1200);
+        } else if (data.action === "profile_error") {
+          showFeedback(data.text || "Failed to update profile.", true);
+          document.getElementById("save-btn").disabled = false;
         }
       };
 
-      socket.onclose = () => {
-        showFeedback("Cannot connect to the server. Please refresh and retry.", true);
+      socket.onerror = () => {
+        showFeedback("Could not connect to the chat server.", true);
+        document.getElementById("save-btn").disabled = false;
       };
     }
 
-    function submitProfileUpdate() {
-      const new_fullname = document.getElementById("prof-fullname").value.trim();
-      const new_username = document.getElementById("prof-username").value.trim();
-      const new_email = document.getElementById("prof-email").value.trim();
-      const new_password = document.getElementById("prof-new-password").value;
-      const current_password = document.getElementById("prof-current-password").value;
-
-      if (!new_fullname || !new_username || !new_email) {
-        showFeedback("Full Name, Username, and Email cannot be empty.", true);
-        return;
+    async function bootstrapProfile() {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+        if (!response.ok) {
+          window.location.replace("login.html");
+          return;
+        }
+        const data = await response.json();
+        currentUser = data.user;
+        sessionStorage.setItem("chat_user", JSON.stringify(currentUser));
+      } catch (err) {
+        const cached = sessionStorage.getItem("chat_user");
+        if (cached) {
+          currentUser = JSON.parse(cached);
+        } else {
+          window.location.replace("login.html");
+          return;
+        }
       }
 
-      if (!current_password) {
-        showFeedback("Please enter your current password to confirm changes.", true);
+      document.getElementById("prof-fullname").value = currentUser.full_name || "";
+      document.getElementById("prof-username").value = currentUser.username || "";
+      document.getElementById("prof-email").value = currentUser.email || "";
+      pendingAvatarBase64 = currentUser.avatar || "";
+      renderAvatarPreview();
+
+      initSocket();
+    }
+
+    window.addEventListener("DOMContentLoaded", bootstrapProfile);
+
+    function handleSaveProfile(e) {
+      e.preventDefault();
+
+      const newFullName = document.getElementById("prof-fullname").value.trim();
+      const newUsername = document.getElementById("prof-username").value.trim();
+      const newEmail = document.getElementById("prof-email").value.trim();
+      const newPassword = document.getElementById("prof-new-password").value;
+      const confirmPassword = document.getElementById("prof-confirm-password").value;
+      const currentPassword = document.getElementById("prof-current-password").value;
+
+      // Validate re-entered password when changing password
+      if (newPassword) {
+        if (!confirmPassword) {
+          showFeedback("Please confirm your new password.", true);
+          document.getElementById("prof-confirm-password").focus();
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          showFeedback("New passwords do not match. Please verify your confirmation.", true);
+          document.getElementById("prof-confirm-password").focus();
+          return;
+        }
+        if (newPassword.length < 6) {
+          showFeedback("New password must be at least 6 characters long.", true);
+          document.getElementById("prof-new-password").focus();
+          return;
+        }
+      }
+
+      if (!currentPassword) {
+        showFeedback("Current password is required to save modifications.", true);
+        document.getElementById("prof-current-password").focus();
         return;
       }
 
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         showFeedback("Connecting to server, please wait...", true);
-        initSocket();
         return;
       }
 
+      document.getElementById("save-btn").disabled = true;
+
       socket.send(JSON.stringify({
         action: "update_profile",
-        current_username: user.username,
-        current_password: current_password,
-        new_fullname: new_fullname,
-        new_username: new_username,
-        new_email: new_email,
-        new_password: new_password,
-        avatar: currentAvatarBase64
+        current_username: currentUser.username,
+        current_password: currentPassword,
+        new_fullname: newFullName,
+        new_username: newUsername,
+        new_email: newEmail,
+        new_password: newPassword,
+        avatar: pendingAvatarBase64
       }));
     }
-
-    loadSession().then((ok) => {
-      if (ok) initSocket();
-    });
   </script>
 </body>
 </html>

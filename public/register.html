@@ -32,6 +32,10 @@
         <label>Password</label>
         <input type="password" id="reg-password" class="input-field" placeholder="••••••••" />
       </div>
+      <div class="field-group">
+        <label>Confirm Password</label>
+        <input type="password" id="reg-confirm-password" class="input-field" placeholder="••••••••" />
+      </div>
       <button class="btn btn-primary" onclick="submitRegister()">Sign Up</button>
     </div>
 
@@ -94,9 +98,22 @@
       const username = document.getElementById("reg-username").value.trim();
       const email = document.getElementById("reg-email").value.trim();
       const password = document.getElementById("reg-password").value;
+      const confirm_password = document.getElementById("reg-confirm-password").value;
 
-      if (!full_name || !username || !email || !password) {
+      if (!full_name || !username || !email || !password || !confirm_password) {
         showFeedback("All fields are required.", true);
+        return;
+      }
+
+      if (password !== confirm_password) {
+        showFeedback("Passwords do not match. Please verify and re-enter.", true);
+        document.getElementById("reg-confirm-password").focus();
+        return;
+      }
+
+      if (password.length < 6) {
+        showFeedback("Password must be at least 6 characters long.", true);
+        document.getElementById("reg-password").focus();
         return;
       }
 
@@ -116,6 +133,10 @@
     }
 
     document.getElementById("reg-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitRegister();
+    });
+
+    document.getElementById("reg-confirm-password").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitRegister();
     });
 
