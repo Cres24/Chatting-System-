@@ -33,12 +33,23 @@
         <input type="text" id="friend-filter" class="input-field" placeholder="Find a friend..." oninput="filterConversations()" />
       </div>
 
-      <!-- Groups Section -->
+      <!-- Groups Section with Minimize/Maximize Button between 'Groups' and '+ New' -->
       <div class="section-title">
-        <span>Groups</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>Groups</span>
+          <button 
+            id="groups-collapse-btn" 
+            class="btn btn-secondary btn-sm" 
+            style="padding: 1px 7px; font-size: 11px; line-height: 1.2;" 
+            onclick="toggleGroupsCollapse()" 
+            title="Minimize / Maximize Groups"
+          >
+            ▾
+          </button>
+        </div>
         <button class="btn btn-secondary btn-sm" onclick="openGroupModal()">+ New</button>
       </div>
-      <div id="groups-list" class="sidebar-scrollable" style="max-height: 140px;"></div>
+      <div id="groups-list" class="sidebar-scrollable" style="max-height: 140px; transition: max-height 0.2s ease, opacity 0.2s ease;"></div>
 
       <!-- Direct Chats Section -->
       <div class="section-title">Chats</div>
@@ -259,6 +270,7 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
+    let isGroupsCollapsed = false;
     let expandedMemberUsername = null;
     let pendingGroupAvatarBase64 = "";
 
@@ -278,6 +290,23 @@
         return `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; cursor: pointer;" onclick="event.stopPropagation(); viewAvatarFullscreen('${avatarUrl}', '${escapeHtml(nameFallback || '')}')" />`;
       }
       return (nameFallback || "?").charAt(0).toUpperCase();
+    }
+
+    // Toggle minimize/maximize for the Groups list
+    function toggleGroupsCollapse() {
+      const gList = document.getElementById("groups-list");
+      const btn = document.getElementById("groups-collapse-btn");
+      isGroupsCollapsed = !isGroupsCollapsed;
+
+      if (isGroupsCollapsed) {
+        gList.style.display = "none";
+        btn.textContent = "▸";
+        btn.title = "Maximize Groups";
+      } else {
+        gList.style.display = "flex";
+        btn.textContent = "▾";
+        btn.title = "Minimize Groups";
+      }
     }
 
     // Lightbox Controls
@@ -315,14 +344,14 @@
       }
     }
 
-    // ================= HEADER ACTION TOGGLE (BELOW NAME, ABOVE STATUS) =================
+    // Header actions toggle
     function toggleChatHeaderActions() {
       if (!activeChat) return;
       const actionsContainer = document.getElementById("chat-header-actions");
       actionsContainer.classList.toggle("hidden");
     }
 
-    // ================= RESPONSIVE NAVIGATION HELPERS =================
+    // Responsive navigation helpers
     function backToSidebar() {
       const chatView = document.getElementById("chat-view");
       chatView.classList.remove("chat-active");
@@ -352,7 +381,7 @@
       }
     }
 
-    // ---------------- NOTIFICATIONS ----------------
+    // Notifications
     function notificationsAvailable() {
       return typeof window.ChatNotify !== "undefined" && ChatNotify.supported();
     }
@@ -475,9 +504,7 @@
     function focusRequestsPanel() {
       try {
         window.focus();
-      } catch (err) {
-        /* focus may be blocked */
-      }
+      } catch (err) {}
       showDefaultSocialView();
       const list = document.getElementById("requests-list");
       if (!list) return;
@@ -628,7 +655,6 @@
       showGroupView(cachedGroupMembers);
     }
 
-    // ---------------- INLINE EDIT GROUP PANEL ----------------
     function toggleInlineEditGroupPanel() {
       const panel = document.getElementById("inline-edit-group-panel");
       const isClosed = panel.classList.contains("hidden");
@@ -723,7 +749,6 @@
 
       updateActiveChatAvatarUI();
 
-      // Show/hide the Edit button in header
       const editGroupBtn = document.getElementById("edit-group-btn");
       if (editGroupBtn) {
         editGroupBtn.classList.toggle("hidden", !amIAdmin);
@@ -787,8 +812,8 @@
         };
 
         topRow.innerHTML = `
-          <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
-            <div class="avatar-wrapper" style="width: 34px; height: 34px; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
+            <div class="avatar-wrapper" style="width: 32px; height: 32px; flex-shrink: 0;">
               <div class="user-avatar" style="font-size: 12px; overflow: hidden;">${renderAvatarHTML(member.avatar, displayName)}</div>
               <span class="status-dot-pip ${member.online ? 'online' : 'offline'}"></span>
             </div>
@@ -808,7 +833,7 @@
           const actionRow = document.createElement("div");
           actionRow.style.display = "flex";
           actionRow.style.gap = "8px";
-          actionRow.style.padding = "4px 12px 10px 44px";
+          actionRow.style.padding = "4px 12px 10px 40px";
           actionRow.innerHTML = `
             <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); promoteToAdmin('${member.username}')">Make Admin</button>
             <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #ef4444;" onclick="event.stopPropagation(); removeMemberFromGroup('${member.username}')">Remove</button>
@@ -1023,7 +1048,7 @@
       document.getElementById("inline-edit-group-panel").classList.add("hidden");
       document.getElementById("chat-header-actions").classList.add("hidden");
 
-      // Trigger Mobile view transition to active chat screen
+      // Mobile transition to active chat screen
       const chatView = document.getElementById("chat-view");
       chatView.classList.remove("social-active");
       chatView.classList.add("chat-active");
@@ -1236,12 +1261,11 @@
 
       const reader = new FileReader();
       reader.onload = () => {
-        const base64Data = reader.result;
         socket.send(JSON.stringify({
           action: "send_message",
           chat_type: activeChat.type,
           target_id: activeChat.id,
-          text: base64Data,
+          text: reader.result,
           msg_type: msgType
         }));
       };
