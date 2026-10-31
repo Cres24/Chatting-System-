@@ -288,6 +288,28 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
+    // Track timestamps of the latest text/media message for sorting: { "dm:username": timestamp, "group:id": timestamp }
+    const LAST_ACTIVITY_KEY = "chat_last_activity_map";
+    let lastActivityMap = {};
+    try {
+      lastActivityMap = JSON.parse(localStorage.getItem(LAST_ACTIVITY_KEY) || "{}");
+    } catch (e) {
+      lastActivityMap = {};
+    }
+
+    function recordActivity(chatType, id, timestamp = Date.now()) {
+      if (!chatType || !id) return;
+      const key = conversationKey(chatType, id);
+      lastActivityMap[key] = Math.max(lastActivityMap[key] || 0, timestamp);
+      try {
+        localStorage.setItem(LAST_ACTIVITY_KEY, JSON.stringify(lastActivityMap));
+      } catch (err) {}
+    }
+
+    function getActivityTimestamp(chatType, id) {
+      return lastActivityMap[conversationKey(chatType, id)] || 0;
+    }
+
     let isGroupsCollapsed = false;
     let expandedMemberUsername = null;
     let pendingGroupAvatarBase64 = "";
@@ -1080,10 +1102,14 @@
 
       const query = (document.getElementById("friend-filter")?.value || "").toLowerCase().trim();
 
-      // Groups
+      // Groups - sorted by most recent text activity
       const gList = document.getElementById("groups-list");
       gList.innerHTML = "";
-      const filteredGroups = currentGroups.filter(g => g.name.toLowerCase().includes(query));
+      const sortedGroups = [...currentGroups].sort((a, b) => {
+        return getActivityTimestamp("group", b.id) - getActivityTimestamp("group", a.id);
+      });
+
+      const filteredGroups = sortedGroups.filter(g => g.name.toLowerCase().includes(query));
       if (!filteredGroups.length) {
         gList.innerHTML = "<span style='color:var(--text-muted); font-size:12px;'>No groups found</span>";
       } else {
@@ -1108,10 +1134,14 @@
         });
       }
 
-      // Friends
+      // Friends - sorted by most recent text activity
       const fList = document.getElementById("friends-list");
       fList.innerHTML = "";
-      const filteredFriends = currentFriends.filter(f => 
+      const sortedFriends = [...currentFriends].sort((a, b) => {
+        return getActivityTimestamp("direct", b.username) - getActivityTimestamp("direct", a.username);
+      });
+
+      const filteredFriends = sortedFriends.filter(f => 
         (f.full_name || f.username).toLowerCase().includes(query) || 
         f.username.toLowerCase().includes(query)
       );
@@ -1243,6 +1273,12 @@
       const box = document.getElementById("chat-box");
       box.innerHTML = "";
       messages.forEach(m => appendMessage(m.sender, m.text, m.msg_type || "text", m.avatar || ""));
+
+      // Record newest history timestamp if messages exist
+      if (messages.length > 0 && activeChat) {
+        recordActivity(activeChat.type, activeChat.id, Date.now());
+        renderDashboard();
+      }
     }
 
     function handleIncomingMessage(msg) {
@@ -1253,16 +1289,21 @@
         String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
+      // Bump last activity time to current epoch
+      recordActivity(msg.chat_type, msg.target_id, Date.now());
+
       // Render to DOM if actively open
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
 
-      if (isMine) return;
-
-      if (!isActive) {
+      if (!isMine && !isActive) {
         bumpUnread(key);
+      } else {
+        renderDashboard();
       }
+
+      if (isMine) return;
 
       // If active and focused, suppress popups
       if (isActive && isFocused) return;
@@ -1346,6 +1387,9 @@
           text: text,
           msg_type: "text"
         }));
+        // Update local activity order immediately
+        recordActivity(activeChat.type, activeChat.id, Date.now());
+        renderDashboard();
         input.value = "";
       }
     }
@@ -1372,14 +1416,15 @@
 
       const reader = new FileReader();
       reader.onload = () => {
-        const base64Data = reader.result;
         socket.send(JSON.stringify({
           action: "send_message",
           chat_type: activeChat.type,
           target_id: activeChat.id,
-          text: base64Data,
+          text: reader.result,
           msg_type: msgType
         }));
+        recordActivity(activeChat.type, activeChat.id, Date.now());
+        renderDashboard();
       };
       reader.readAsDataURL(file);
       event.target.value = "";
@@ -1416,6 +1461,8 @@
                   text: base64Audio,
                   msg_type: "audio"
                 }));
+                recordActivity(activeChat.type, activeChat.id, Date.now());
+                renderDashboard();
               }
             };
             reader.readAsDataURL(audioBlob);
