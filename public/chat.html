@@ -60,8 +60,8 @@
     <div id="main-chat">
       <div class="chat-topbar" style="position: relative; z-index: 20;">
         <div class="topbar-left" style="flex-grow: 1; min-width: 0;">
-          <!-- Mobile Back Button to return to sidebar list -->
-          <button class="btn btn-secondary btn-icon mobile-nav-btn" onclick="backToSidebar()" title="Back to conversations">←</button>
+          <!-- Phone-Only Back Button -->
+          <button class="btn btn-secondary btn-icon phone-back-btn" onclick="backToSidebar()" title="Back to conversations">←</button>
 
           <!-- Topbar Avatar with preview click -->
           <div class="avatar-wrapper" id="active-chat-avatar-wrapper" style="display: none; cursor: pointer;" onclick="inspectActiveChatAvatar()" title="View photo">
@@ -103,9 +103,9 @@
           </div>
         </div>
 
-        <!-- Opposite side action buttons in the topbar segment -->
+        <!-- Topbar Right Actions -->
         <div class="topbar-right-actions" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-          <!-- MUTE / UNMUTE CHAT BUTTON -->
+          <!-- Mute / Unmute Chat Button -->
           <button 
             id="chat-mute-btn" 
             class="btn btn-secondary btn-icon hidden" 
@@ -115,7 +115,7 @@
             🔔
           </button>
 
-          <!-- Tablet / Mobile Toggle to reveal right panel info -->
+          <!-- Tablet / Mobile Drawer Button -->
           <button class="btn btn-secondary btn-icon mobile-nav-btn tablet-social-toggle" onclick="toggleTabletSocialDrawer()" title="View Members/Info">👥</button>
         </div>
 
@@ -190,8 +190,8 @@
 
     <!-- PANEL 3: RIGHT SOCIAL & GROUP INFO -->
     <div id="social-panel">
-      <!-- Mobile Close / Back for Social Panel -->
-      <div style="display: flex; justify-content: space-between; align-items: center;" class="mobile-nav-btn">
+      <!-- Phone-Only Close / Back for Social Panel -->
+      <div style="display: flex; justify-content: space-between; align-items: center;" class="phone-back-btn">
         <button class="btn btn-secondary btn-sm" onclick="closeMobileSocialView()">← Back</button>
         <span style="font-size: 13px; font-weight: 700;">Details</span>
       </div>
@@ -288,7 +288,7 @@
     let currentBlocked = [];
     let cachedGroupMembers = [];
 
-    // Track timestamps of the latest text/media message for sorting: { "dm:username": timestamp, "group:id": timestamp }
+    // Track timestamps of the latest text/media message for sorting
     const LAST_ACTIVITY_KEY = "chat_last_activity_map";
     let lastActivityMap = {};
     try {
@@ -325,7 +325,7 @@
     let audioChunks = [];
     let isRecording = false;
 
-    // Load muted chats map: { "dm:alice": true, "group:2": true }
+    // Load muted chats map
     function getMutedChats() {
       try {
         return JSON.parse(localStorage.getItem(MUTED_CHATS_STORAGE_KEY) || "{}");
@@ -373,7 +373,7 @@
       muteBtn.classList.toggle("active", muted);
     }
 
-    // Renders avatar HTML and attaches an inline preview click if an image exists
+    // Avatar HTML rendering
     function renderAvatarHTML(avatarUrl, nameFallback) {
       if (avatarUrl) {
         return `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; cursor: pointer;" onclick="event.stopPropagation(); viewAvatarFullscreen('${avatarUrl}', '${escapeHtml(nameFallback || '')}')" />`;
@@ -463,7 +463,7 @@
 
     function toggleTabletSocialDrawer() {
       const panel = document.getElementById("social-panel");
-      if (window.innerWidth <= 768) {
+      if (window.innerWidth <= 600) {
         openMobileSocialView();
       } else {
         panel.classList.toggle("open");
@@ -925,7 +925,7 @@
           const actionRow = document.createElement("div");
           actionRow.style.display = "flex";
           actionRow.style.gap = "8px";
-          actionRow.style.padding = "4px 12px 10px 44px";
+          actionRow.style.padding = "4px 12px 10px 40px";
           actionRow.innerHTML = `
             <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="event.stopPropagation(); promoteToAdmin('${member.username}')">Make Admin</button>
             <button class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #ef4444;" onclick="event.stopPropagation(); removeMemberFromGroup('${member.username}')">Remove</button>
@@ -1054,7 +1054,7 @@
         reqList.appendChild(div);
       });
 
-      // Render Online Friends Section directly below Send Request
+      // Render Online Friends Section
       const onlineFriends = currentFriends.filter(f => f.online);
       const onlineCountEl = document.getElementById("online-friends-count");
       if (onlineCountEl) {
@@ -1274,7 +1274,6 @@
       box.innerHTML = "";
       messages.forEach(m => appendMessage(m.sender, m.text, m.msg_type || "text", m.avatar || ""));
 
-      // Record newest history timestamp if messages exist
       if (messages.length > 0 && activeChat) {
         recordActivity(activeChat.type, activeChat.id, Date.now());
         renderDashboard();
@@ -1289,10 +1288,8 @@
         String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
-      // Bump last activity time to current epoch
       recordActivity(msg.chat_type, msg.target_id, Date.now());
 
-      // Render to DOM if actively open
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
@@ -1304,11 +1301,8 @@
       }
 
       if (isMine) return;
-
-      // If active and focused, suppress popups
       if (isActive && isFocused) return;
 
-      // Check if conversation is muted by user
       const isMuted = isChatMuted(msg.chat_type, msg.target_id);
       if (isMuted) return;
 
@@ -1387,7 +1381,6 @@
           text: text,
           msg_type: "text"
         }));
-        // Update local activity order immediately
         recordActivity(activeChat.type, activeChat.id, Date.now());
         renderDashboard();
         input.value = "";

@@ -41,97 +41,7 @@ body {
   display: none !important;
 }
 
-/* ================= AUTHENTICATION CARDS (LOGIN, REGISTER, PROFILE) ================= */
-.auth-card {
-  background: var(--bg-card-solid);
-  padding: 38px 32px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-  width: 100%;
-  max-width: 420px;
-  animation: fadeIn 0.25s ease forwards;
-}
-
-.auth-header {
-  text-align: center;
-  margin-bottom: 24px;
-}
-
-.brand-badge {
-  font-size: 32px;
-  margin-bottom: 10px;
-  display: inline-block;
-}
-
-.auth-header h2 {
-  font-size: 22px;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.auth-header p {
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.auth-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-}
-
-.field-group label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.auth-footer {
-  margin-top: 22px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.auth-footer a {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.auth-footer a:hover {
-  text-decoration: underline;
-}
-
-.auth-feedback {
-  margin-top: 14px;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 13px;
-  text-align: center;
-}
-
-.auth-feedback.error {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-.auth-feedback.success {
-  background: rgba(34, 197, 94, 0.15);
-  color: #86efac;
-  border: 1px solid rgba(34, 197, 94, 0.3);
-}
-
-/* ================= 3-SEGMENT SPLIT VIEW ================= */
+/* ================= 3-PANEL SPLIT VIEW ================= */
 #chat-view {
   position: relative;
   display: flex;
@@ -203,8 +113,8 @@ body {
 
 .status-dot-pip {
   position: absolute;
-  bottom: 0px;
-  right: 0px;
+  bottom: 0;
+  right: 0;
   width: 11px;
   height: 11px;
   border-radius: 50%;
@@ -786,15 +696,17 @@ body {
 }
 
 /* ===============================================================
-   RESPONSIVE MEDIA QUERIES (TABLETS & PHONES)
+   RESPONSIVE MEDIA QUERIES (LAPTOPS, TABLETS & PHONES)
    =============================================================== */
 
+/* Hidden on desktop and laptops by default */
+.phone-back-btn,
 .mobile-nav-btn {
-  display: none;
+  display: none !important;
 }
 
-/* TABLETS & SMALL LAPTOPS (768px - 1024px) */
-@media screen and (max-width: 1024px) {
+/* TABLETS & SMALL LAPTOPS (601px to 1024px) */
+@media screen and (min-width: 601px) and (max-width: 1024px) {
   body {
     padding: 0;
   }
@@ -807,14 +719,22 @@ body {
     gap: 8px;
   }
 
+  /* Keep sidebar & main chat visible side-by-side */
   #sidebar {
     width: 260px;
     min-width: 240px;
     border-radius: 0;
+    display: flex !important;
   }
 
   #main-chat {
     border-radius: 0;
+    display: flex !important;
+  }
+
+  /* Back buttons remain strictly hidden on tablets */
+  .phone-back-btn {
+    display: none !important;
   }
 
   /* Slide-out drawer for social panel on tablets */
@@ -833,13 +753,18 @@ body {
     right: 0;
   }
 
+  /* Display the member/social toggle on tablets */
   .tablet-social-toggle {
     display: inline-flex !important;
   }
 }
 
-/* SMARTPHONES (< 768px) */
-@media screen and (max-width: 768px) {
+/* SMARTPHONES (600px and below) */
+@media screen and (max-width: 600px) {
+  body {
+    padding: 0;
+  }
+
   #chat-view {
     width: 100vw;
     height: 100vh;
@@ -854,37 +779,42 @@ body {
     border: none !important;
   }
 
-  /* Single-panel active view toggle */
-  #chat-view:not(.chat-active):not(.social-active) #sidebar {
-    display: flex;
-  }
-  #chat-view:not(.chat-active):not(.social-active) #main-chat,
-  #chat-view:not(.chat-active):not(.social-active) #social-panel {
-    display: none;
-  }
-
-  #chat-view.chat-active #sidebar {
-    display: none;
-  }
-  #chat-view.chat-active #main-chat {
-    display: flex;
-  }
-  #chat-view.chat-active #social-panel {
-    display: none;
-  }
-
-  #chat-view.social-active #sidebar,
-  #chat-view.social-active #main-chat {
-    display: none;
-  }
-  #chat-view.social-active #social-panel {
-    position: relative;
-    right: 0;
-    display: flex;
+  /* Back button exclusively appears on phones */
+  .phone-back-btn {
+    display: inline-flex !important;
   }
 
   .mobile-nav-btn {
     display: inline-flex !important;
+  }
+
+  /* Single-panel active state routing */
+  #chat-view:not(.chat-active):not(.social-active) #sidebar {
+    display: flex !important;
+  }
+  #chat-view:not(.chat-active):not(.social-active) #main-chat,
+  #chat-view:not(.chat-active):not(.social-active) #social-panel {
+    display: none !important;
+  }
+
+  #chat-view.chat-active #sidebar {
+    display: none !important;
+  }
+  #chat-view.chat-active #main-chat {
+    display: flex !important;
+  }
+  #chat-view.chat-active #social-panel {
+    display: none !important;
+  }
+
+  #chat-view.social-active #sidebar,
+  #chat-view.social-active #main-chat {
+    display: none !important;
+  }
+  #chat-view.social-active #social-panel {
+    position: relative;
+    right: 0;
+    display: flex !important;
   }
 
   #inline-edit-group-panel {
