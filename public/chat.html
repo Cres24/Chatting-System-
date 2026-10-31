@@ -59,7 +59,7 @@
     <!-- PANEL 2: CENTER CHAT -->
     <div id="main-chat">
       <div class="chat-topbar" style="position: relative; z-index: 20;">
-        <div class="topbar-left" style="flex-grow: 1;">
+        <div class="topbar-left" style="flex-grow: 1; min-width: 0;">
           <!-- Mobile Back Button to return to sidebar list -->
           <button class="btn btn-secondary btn-icon mobile-nav-btn" onclick="backToSidebar()" title="Back to conversations">←</button>
 
@@ -69,7 +69,7 @@
             <span class="status-dot-pip" id="active-chat-status-pip"></span>
           </div>
 
-          <div style="overflow: hidden; display: flex; flex-direction: column;">
+          <div style="overflow: hidden; display: flex; flex-direction: column; min-width: 0;">
             <!-- Clickable Name Header -->
             <div 
               class="chat-title" 
@@ -103,7 +103,18 @@
           </div>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 6px;">
+        <!-- Opposite side action buttons in the topbar segment -->
+        <div class="topbar-right-actions" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+          <!-- MUTE / UNMUTE CHAT BUTTON -->
+          <button 
+            id="chat-mute-btn" 
+            class="btn btn-secondary btn-icon hidden" 
+            onclick="toggleCurrentChatMute()" 
+            title="Mute notifications for this chat"
+          >
+            🔔
+          </button>
+
           <!-- Tablet / Mobile Toggle to reveal right panel info -->
           <button class="btn btn-secondary btn-icon mobile-nav-btn tablet-social-toggle" onclick="toggleTabletSocialDrawer()" title="View Members/Info">👥</button>
         </div>
@@ -215,7 +226,7 @@
           <button class="btn btn-primary" onclick="sendFriendRequest()">Send Request</button>
         </div>
 
-        <!-- ONLINE FRIENDS SECTION (Directly below Send Request) -->
+        <!-- ONLINE FRIENDS SECTION -->
         <div class="section-title" style="margin-top: 16px;">
           <span>Online Friends</span>
           <span id="online-friends-count" style="font-size: 11px; text-transform: none; color: var(--online);">0 online</span>
@@ -284,12 +295,61 @@
     // Notification state
     const BASE_TITLE = document.title;
     const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
+    const MUTED_CHATS_STORAGE_KEY = "chat_muted_conversations";
     let unreadCounts = {};
     let notificationsEnabled = false;
 
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
+
+    // Load muted chats map: { "dm:alice": true, "group:2": true }
+    function getMutedChats() {
+      try {
+        return JSON.parse(localStorage.getItem(MUTED_CHATS_STORAGE_KEY) || "{}");
+      } catch (err) {
+        return {};
+      }
+    }
+
+    function isChatMuted(type, id) {
+      if (!type || !id) return false;
+      const key = conversationKey(type, id);
+      return !!getMutedChats()[key];
+    }
+
+    function toggleCurrentChatMute() {
+      if (!activeChat) return;
+      const key = conversationKey(activeChat.type, activeChat.id);
+      const mutedMap = getMutedChats();
+
+      if (mutedMap[key]) {
+        delete mutedMap[key];
+        showToast(`Unmuted notifications for ${activeChat.name}`, "info");
+      } else {
+        mutedMap[key] = true;
+        showToast(`Muted notifications for ${activeChat.name}`, "info");
+      }
+
+      localStorage.setItem(MUTED_CHATS_STORAGE_KEY, JSON.stringify(mutedMap));
+      updateChatMuteButtonUI();
+    }
+
+    function updateChatMuteButtonUI() {
+      const muteBtn = document.getElementById("chat-mute-btn");
+      if (!muteBtn) return;
+
+      if (!activeChat) {
+        muteBtn.classList.add("hidden");
+        return;
+      }
+
+      muteBtn.classList.remove("hidden");
+      const muted = isChatMuted(activeChat.type, activeChat.id);
+      muteBtn.textContent = muted ? "🔕" : "🔔";
+      muteBtn.title = muted ? "Chat is muted (click to unmute)" : "Mute notifications for this chat";
+      muteBtn.classList.toggle("active", muted);
+    }
 
     // Renders avatar HTML and attaches an inline preview click if an image exists
     function renderAvatarHTML(avatarUrl, nameFallback) {
@@ -756,6 +816,7 @@
       const amIAdmin = meRecord && meRecord.role === "admin";
 
       updateActiveChatAvatarUI();
+      updateChatMuteButtonUI();
 
       // Show/hide the Edit button in header
       const editGroupBtn = document.getElementById("edit-group-btn");
@@ -997,7 +1058,6 @@
           `;
           div.onclick = () => {
             selectChat("direct", f.username, f.full_name || f.username, true, f.avatar);
-            // Auto close drawer if in tablet/mobile mode
             const socialPanel = document.getElementById("social-panel");
             if (socialPanel) socialPanel.classList.remove("open");
           };
@@ -1107,6 +1167,7 @@
 
       avatarWrap.style.display = "block";
       updateActiveChatAvatarUI();
+      updateChatMuteButtonUI();
 
       if (type === "group") {
         statusPip.className = "status-dot-pip online";
@@ -1173,6 +1234,7 @@
       document.getElementById("message-input").disabled = true;
       document.getElementById("send-btn").disabled = true;
       document.getElementById("chat-box").innerHTML = "";
+      updateChatMuteButtonUI();
       showDefaultSocialView();
       backToSidebar();
     }
@@ -1191,6 +1253,7 @@
         String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
+      // Render to DOM if actively open
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
@@ -1201,7 +1264,12 @@
         bumpUnread(key);
       }
 
+      // If active and focused, suppress popups
       if (isActive && isFocused) return;
+
+      // Check if conversation is muted by user
+      const isMuted = isChatMuted(msg.chat_type, msg.target_id);
+      if (isMuted) return;
 
       const previewText = (typeof window.ChatNotify !== "undefined")
         ? ChatNotify.preview(msg.msg_type, msg.text)
