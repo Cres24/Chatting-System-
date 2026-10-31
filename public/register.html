@@ -17,26 +17,57 @@
 
     <div class="auth-fields">
       <div class="field-group">
-        <label>Full Name</label>
-        <input type="text" id="reg-fullname" class="input-field" placeholder="John Doe" autofocus />
+        <label for="reg-fullname">Full Name</label>
+        <input 
+          type="text" 
+          id="reg-fullname" 
+          class="input-field" 
+          placeholder="John Doe" 
+          autofocus 
+        />
       </div>
+
       <div class="field-group">
-        <label>Username</label>
-        <input type="text" id="reg-username" class="input-field" placeholder="johndoe" />
+        <label for="reg-username">Username</label>
+        <input 
+          type="text" 
+          id="reg-username" 
+          class="input-field" 
+          placeholder="johndoe" 
+        />
       </div>
+
       <div class="field-group">
-        <label>Email Address</label>
-        <input type="email" id="reg-email" class="input-field" placeholder="john@example.com" />
+        <label for="reg-email">Email Address</label>
+        <input 
+          type="email" 
+          id="reg-email" 
+          class="input-field" 
+          placeholder="john@example.com" 
+        />
       </div>
+
       <div class="field-group">
-        <label>Password</label>
-        <input type="password" id="reg-password" class="input-field" placeholder="••••••••" />
+        <label for="reg-password">Password</label>
+        <input 
+          type="password" 
+          id="reg-password" 
+          class="input-field" 
+          placeholder="••••••••" 
+        />
       </div>
+
       <div class="field-group">
-        <label>Confirm Password</label>
-        <input type="password" id="reg-confirm-password" class="input-field" placeholder="••••••••" />
+        <label for="reg-confirm-password">Confirm Password</label>
+        <input 
+          type="password" 
+          id="reg-confirm-password" 
+          class="input-field" 
+          placeholder="••••••••" 
+        />
       </div>
-      <button class="btn btn-primary" onclick="submitRegister()">Sign Up</button>
+
+      <button id="reg-btn" class="btn btn-primary" onclick="submitRegister()">Sign Up</button>
     </div>
 
     <div id="feedback" class="auth-feedback hidden"></div>
@@ -53,7 +84,7 @@
   <script>
     let socket = null;
 
-    function showFeedback(msg, isError) {
+    function showFeedback(msg, isError = true) {
       const fb = document.getElementById("feedback");
       fb.textContent = msg;
       fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
@@ -61,11 +92,9 @@
     }
 
     function initSocket() {
-      // Connect to 127.0.0.1 explicitly
       socket = createChatSocket();
 
       socket.onopen = () => {
-        console.log("WebSocket connected successfully.");
         const fb = document.getElementById("feedback");
         if (fb.classList.contains("error")) {
           fb.classList.add("hidden");
@@ -84,8 +113,8 @@
         }
       };
 
-      socket.onerror = (err) => {
-        console.error("Socket error encountered:", err);
+      socket.onerror = () => {
+        showFeedback("Could not connect to the chat server.", true);
       };
 
       socket.onclose = () => {

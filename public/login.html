@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Log In - Real-Time Chat</title>
+  <title>Sign In - Real-Time Chat</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -12,25 +12,38 @@
     <div class="auth-header">
       <div class="brand-badge">💬</div>
       <h2>Welcome Back</h2>
-      <p>Log in using your username or email address</p>
+      <p>Enter your credentials to access your account</p>
     </div>
 
     <div class="auth-fields">
       <div class="field-group">
-        <label>Account</label>
-        <input type="text" id="login-id" class="input-field" placeholder="Username or Email" autofocus />
+        <label for="login-identifier">Username or Email</label>
+        <input 
+          type="text" 
+          id="login-identifier" 
+          class="input-field" 
+          placeholder="Enter username or email" 
+          autofocus 
+        />
       </div>
+
       <div class="field-group">
-        <label>Password</label>
-        <input type="password" id="login-password" class="input-field" placeholder="••••••••" />
+        <label for="login-password">Password</label>
+        <input 
+          type="password" 
+          id="login-password" 
+          class="input-field" 
+          placeholder="••••••••" 
+        />
       </div>
-      <button class="btn btn-primary" onclick="submitLogin()">Log In</button>
+
+      <button id="login-btn" class="btn btn-primary" onclick="submitLogin()">Log In</button>
     </div>
 
     <div id="feedback" class="auth-feedback hidden"></div>
 
     <div class="auth-footer">
-      Don't have an account? <a href="register.html">Create one</a>
+      Don't have an account? <a href="register.html">Sign up</a>
     </div>
   </div>
 
@@ -38,15 +51,24 @@
   <script src="js/upload.js"></script>
   <script src="js/realtime.js"></script>
   <script src="js/socket-shim.js"></script>
-  <script src="notifications.js"></script>
   <script>
     let socket = null;
 
-    function connect() {
+    function showFeedback(msg, isError = true) {
+      const fb = document.getElementById("feedback");
+      fb.textContent = msg;
+      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
+      fb.classList.remove("hidden");
+    }
+
+    function initSocket() {
       socket = createChatSocket();
 
       socket.onopen = () => {
-        console.log("Connected to server");
+        const fb = document.getElementById("feedback");
+        if (fb.classList.contains("error")) {
+          fb.classList.add("hidden");
+        }
       };
 
       socket.onmessage = (event) => {
@@ -54,66 +76,54 @@
         if (data.action === "auth_error") {
           showFeedback(data.text, true);
         } else if (data.action === "login_success") {
-          // Store user credentials in session storage for chat.html
           sessionStorage.setItem("chat_user", JSON.stringify(data.user));
-          window.location.href = "chat.html";
+          showFeedback("Login successful! Redirecting...", false);
+          setTimeout(() => {
+            window.location.href = "chat.html";
+          }, 800);
         }
       };
 
+      socket.onerror = () => {
+        showFeedback("Could not connect to the chat server.", true);
+      };
+
       socket.onclose = () => {
-        showFeedback("Cannot connect to the server. Please refresh and retry.", true);
+        showFeedback("Connection lost. Please refresh the page.", true);
       };
     }
 
-    function showFeedback(msg, isError) {
-      const fb = document.getElementById("feedback");
-      fb.textContent = msg;
-      fb.className = `auth-feedback ${isError ? 'error' : 'success'}`;
-      fb.classList.remove("hidden");
-    }
-
     function submitLogin() {
-      const identifier = document.getElementById("login-id").value.trim();
+      const identifier = document.getElementById("login-identifier").value.trim();
       const password = document.getElementById("login-password").value;
 
       if (!identifier || !password) {
-        showFeedback("Please fill in both fields.", true);
+        showFeedback("Please enter both username/email and password.", true);
         return;
       }
 
       if (!socket || socket.readyState !== WebSocket.OPEN) {
-        showFeedback("Connecting to server, please wait...", true);
+        showFeedback("Connecting to server, please try again in a moment...", true);
+        initSocket();
         return;
       }
 
-      const sendLogin = () => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ action: "login", identifier, password }));
-        }
-      };
-
-      // Ask for notification permission while the click gesture is still valid.
-      // Never block login for more than 15s if the prompt is ignored.
-      if (window.ChatNotify && ChatNotify.supported() && ChatNotify.permission() === "default") {
-        let finished = false;
-        const proceed = () => {
-          if (finished) return;
-          finished = true;
-          sendLogin();
-        };
-        setTimeout(proceed, 15000);
-        ChatNotify.requestPermission().then(proceed, proceed);
-      } else {
-        sendLogin();
-      }
+      socket.send(JSON.stringify({
+        action: "login",
+        identifier: identifier,
+        password: password
+      }));
     }
+
+    document.getElementById("login-identifier").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") document.getElementById("login-password").focus();
+    });
 
     document.getElementById("login-password").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitLogin();
     });
 
-    // Start connection on page load
-    connect();
+    window.addEventListener("DOMContentLoaded", initSocket);
   </script>
 </body>
 </html>
