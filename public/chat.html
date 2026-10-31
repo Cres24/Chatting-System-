@@ -11,6 +11,7 @@
   <div id="chat-view">
     <!-- PANEL 1: LEFT DIRECTORY & SEARCH -->
     <div id="sidebar">
+      <!-- Signed In User Bar -->
       <div class="user-profile-header">
         <div class="avatar-wrapper" style="cursor: pointer;" onclick="inspectCurrentUserAvatar()" title="View profile picture">
           <div class="user-avatar" id="current-user-avatar">?</div>
@@ -20,22 +21,26 @@
           <span class="name" id="current-user-fullname"></span>
           <span class="tag">Online • Edit</span>
         </div>
+        <!-- Mobile/Tablet Social Panel Switcher -->
         <button class="btn btn-secondary btn-icon mobile-nav-btn" title="View Social / Requests" onclick="openMobileSocialView()">👥</button>
         <button id="notify-toggle" class="btn btn-secondary btn-icon" title="Enable notifications" onclick="toggleNotifications()">🔕</button>
         <button class="btn btn-secondary btn-icon" title="Edit Profile" onclick="window.location.href='profile.html'">✏️</button>
         <button class="btn btn-secondary btn-icon" title="Log Out" onclick="logout()">✕</button>
       </div>
 
+      <!-- Find a Friend Filter Bar -->
       <div class="search-box">
         <input type="text" id="friend-filter" class="input-field" placeholder="Find a friend..." oninput="filterConversations()" />
       </div>
 
+      <!-- Groups Section -->
       <div class="section-title">
         <span>Groups</span>
         <button class="btn btn-secondary btn-sm" onclick="openGroupModal()">+ New</button>
       </div>
       <div id="groups-list" class="sidebar-scrollable" style="max-height: 140px;"></div>
 
+      <!-- Direct Chats Section -->
       <div class="section-title">Chats</div>
       <div id="friends-list" class="sidebar-scrollable" style="flex-grow: 1;"></div>
     </div>
@@ -44,6 +49,7 @@
     <div id="main-chat">
       <div class="chat-topbar" style="position: relative; z-index: 20;">
         <div class="topbar-left">
+          <!-- Mobile Back Button to return to sidebar list -->
           <button class="btn btn-secondary btn-icon mobile-nav-btn" onclick="backToSidebar()" title="Back to conversations">←</button>
 
           <!-- Topbar Avatar with preview click -->
@@ -53,27 +59,31 @@
           </div>
           <div style="overflow: hidden;">
             <div class="chat-title" id="chat-header">Select a conversation</div>
+            <!-- Subtitle and Admin Edit Link -->
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span class="chat-subtitle" id="chat-subtitle">Choose a friend or group</span>
+              <span class="chat-subtitle" id="chat-subtitle">Choose a friend or group from the left</span>
               <button id="edit-group-btn" class="btn btn-sm btn-secondary hidden" style="padding: 1px 6px; font-size: 10px;" onclick="toggleInlineEditGroupPanel()">✏️ Edit</button>
             </div>
           </div>
         </div>
 
         <div style="display: flex; align-items: center; gap: 6px;">
+          <!-- Direct Chat Actions (Unfriend / Block) -->
           <div id="direct-chat-actions" class="hidden" style="display: flex; gap: 6px;">
             <button class="btn btn-secondary btn-sm" onclick="unfriendActiveChat()">Unfriend</button>
             <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="blockActiveChat()">Block</button>
           </div>
 
+          <!-- Group Chat Actions (Leave Group) -->
           <div id="group-chat-actions" class="hidden" style="display: flex; gap: 6px;">
-            <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="leaveActiveGroup()">Leave</button>
+            <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="leaveActiveGroup()">Leave Group</button>
           </div>
 
+          <!-- Tablet / Mobile Toggle to reveal right panel info -->
           <button class="btn btn-secondary btn-icon mobile-nav-btn tablet-social-toggle" onclick="toggleTabletSocialDrawer()" title="View Members/Info">👥</button>
         </div>
 
-        <!-- Inline Edit Group Dropdown -->
+        <!-- INLINE EDIT GROUP PANEL (Appears directly beneath the Edit button in the top bar) -->
         <div id="inline-edit-group-panel" class="hidden" style="position: absolute; top: calc(100% + 8px); left: 20px; width: 320px; background: var(--bg-card-solid); border: 1px solid var(--border); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-float); display: flex; flex-direction: column; gap: 10px; z-index: 30;">
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Edit Group Settings</span>
@@ -99,16 +109,19 @@
         </div>
       </div>
 
+      <!-- Notification permission banner -->
       <div id="notif-banner" class="notif-banner hidden">
-        <span>🔔 Get notified about new messages and group invites?</span>
+        <span>🔔 Get notified about new messages, requests, and group invites?</span>
         <div class="notif-banner-actions">
           <button class="btn btn-secondary btn-sm" onclick="dismissNotificationBanner()">Not now</button>
           <button class="btn btn-primary btn-sm" onclick="enableNotificationsFromBanner()">Enable</button>
         </div>
       </div>
 
+      <!-- Message History Stream -->
       <div id="chat-box"></div>
 
+      <!-- Rounded Input Capsule with Media Attachment & Voice Recorder -->
       <div class="chat-input-bar">
         <input 
           type="file" 
@@ -141,12 +154,13 @@
 
     <!-- PANEL 3: RIGHT SOCIAL & GROUP INFO -->
     <div id="social-panel">
+      <!-- Mobile Close / Back for Social Panel -->
       <div style="display: flex; justify-content: space-between; align-items: center;" class="mobile-nav-btn">
         <button class="btn btn-secondary btn-sm" onclick="closeMobileSocialView()">← Back</button>
         <span style="font-size: 13px; font-weight: 700;">Details</span>
       </div>
 
-      <!-- VIEW A: Group Members -->
+      <!-- VIEW A: Group Members (Active when inside a group) -->
       <div id="group-info-view" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
         <div class="section-title">
           <span>Group Members</span>
@@ -154,6 +168,7 @@
         </div>
         <div id="group-member-count" style="font-size: 11px; text-transform: none; color: var(--accent); margin-top: 2px;"></div>
 
+        <!-- Inline Add Member Dropdown -->
         <div id="inline-add-member-card" class="hidden" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
           <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Invite Contact</div>
           <div id="inline-eligible-friends" class="sidebar-scrollable" style="max-height: 95px; gap: 4px;"></div>
@@ -192,7 +207,7 @@
     <div id="modal-content">
       <h3 style="margin-bottom: 6px;">Create New Group</h3>
       <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">Assemble a room with your friends</p>
-      <input type="text" id="group-name-input" class="input-field" placeholder="Group Name" style="width: 100%; margin-bottom: 14px;" />
+      <input type="text" id="group-name-input" class="input-field" placeholder="Group Name (e.g., Core Team)" style="width: 100%; margin-bottom: 14px;" />
       <div style="font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Select Members:</div>
       <div id="group-friends-checklist" class="modal-checklist"></div>
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -211,18 +226,18 @@
     </div>
   </div>
 
+  <!-- In-app toast fallback -->
   <div id="toast-container"></div>
 
+  <script src="vendor/ably.js"></script>
+  <script src="js/upload.js"></script>
+  <script src="js/realtime.js"></script>
+  <script src="js/socket-shim.js"></script>
   <script src="notifications.js"></script>
   <script>
-    const sessionData = sessionStorage.getItem("chat_user");
-    if (!sessionData) {
-      window.location.href = "login.html";
-    }
-    const user = JSON.parse(sessionData || "{}");
-
+    let user = {};
     let socket = null;
-    let currentUser = user.username;
+    let currentUser = "";
     let activeChat = null;
     let currentFriends = [];
     let currentRequests = [];
@@ -233,6 +248,7 @@
     let expandedMemberUsername = null;
     let pendingGroupAvatarBase64 = "";
 
+    // Notification state
     const BASE_TITLE = document.title;
     const BANNER_DISMISSED_KEY = "chat_notify_banner_dismissed";
     let unreadCounts = {};
@@ -285,10 +301,6 @@
       }
     }
 
-    // Header Init
-    document.getElementById("current-user-fullname").textContent = user.full_name || currentUser;
-    document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(user.avatar, user.full_name || currentUser);
-
     // ================= RESPONSIVE NAVIGATION HELPERS =================
     function backToSidebar() {
       const chatView = document.getElementById("chat-view");
@@ -320,6 +332,7 @@
     }
 
     // ---------------- NOTIFICATIONS ----------------
+
     function notificationsAvailable() {
       return typeof window.ChatNotify !== "undefined" && ChatNotify.supported();
     }
@@ -334,7 +347,9 @@
       let dismissed = false;
       try {
         dismissed = localStorage.getItem(BANNER_DISMISSED_KEY) === "true";
-      } catch (err) {}
+      } catch (err) {
+        /* storage unavailable */
+      }
 
       if (notificationsAvailable() && ChatNotify.permission() === "default" && !dismissed) {
         banner.classList.remove("hidden");
@@ -346,10 +361,21 @@
     function updateNotificationButton() {
       const btn = document.getElementById("notify-toggle");
       if (!btn) return;
+
       const granted = notificationsAvailable() && ChatNotify.permission() === "granted";
       const active = granted && notificationsEnabled;
       btn.textContent = active ? "🔔" : "🔕";
       btn.classList.toggle("active", active);
+
+      if (!notificationsAvailable()) {
+        btn.title = "Browser notifications need localhost or HTTPS";
+      } else if (granted) {
+        btn.title = active ? "Notifications on — click to mute" : "Notifications muted — click to enable";
+      } else if (ChatNotify.permission() === "denied") {
+        btn.title = "Notifications blocked in browser settings";
+      } else {
+        btn.title = "Enable browser notifications";
+      }
     }
 
     async function toggleNotifications() {
@@ -357,7 +383,9 @@
         showToast("Browser notifications need localhost or HTTPS.", "error");
         return;
       }
+
       const current = ChatNotify.permission();
+
       if (current === "granted") {
         notificationsEnabled = !notificationsEnabled;
         ChatNotify.setMuted(!notificationsEnabled);
@@ -365,21 +393,38 @@
         showToast(notificationsEnabled ? "Notifications enabled." : "Notifications muted.", "info");
         return;
       }
+
       if (current === "denied") {
-        showToast("Notifications blocked. Re-enable in browser site settings.", "error");
+        showToast("Notifications are blocked. Re-enable them in your browser's site settings.", "error");
+        updateNotificationButton();
         return;
       }
+
       const result = await ChatNotify.requestPermission();
       notificationsEnabled = ChatNotify.canNotify();
       updateNotificationButton();
       hideNotificationBanner();
+
+      if (result === "granted") {
+        showToast("Notifications enabled.", "success");
+      } else if (result === "denied") {
+        showToast("Notifications blocked. Re-enable them in your browser's site settings.", "error");
+      }
     }
 
-    function enableNotificationsFromBanner() { toggleNotifications(); }
+    function enableNotificationsFromBanner() {
+      toggleNotifications();
+    }
+
     function dismissNotificationBanner() {
-      try { localStorage.setItem(BANNER_DISMISSED_KEY, "true"); } catch (err) {}
+      try {
+        localStorage.setItem(BANNER_DISMISSED_KEY, "true");
+      } catch (err) {
+        /* storage unavailable */
+      }
       hideNotificationBanner();
     }
+
     function hideNotificationBanner() {
       const banner = document.getElementById("notif-banner");
       if (banner) banner.classList.add("hidden");
@@ -388,28 +433,51 @@
     function showToast(message, kind = "info") {
       const container = document.getElementById("toast-container");
       if (!container) return;
+
       const toast = document.createElement("div");
       toast.className = `toast ${kind}`;
       toast.textContent = message;
       container.appendChild(toast);
-      setTimeout(() => toast.remove(), 4000);
+
+      const remove = () => {
+        if (!toast.isConnected) return;
+        toast.classList.add("leaving");
+        setTimeout(() => toast.remove(), 200);
+      };
+
+      toast.onclick = remove;
+      setTimeout(remove, 4000);
     }
 
     function deliverNotification(options, fallbackText) {
-      if (typeof window.ChatNotify === "undefined" || ChatNotify.muted() || !ChatNotify.notify(options)) {
+      if (typeof window.ChatNotify === "undefined") {
         showToast(fallbackText, "message");
+        return;
       }
+      if (ChatNotify.muted()) return;
+      if (ChatNotify.notify(options)) return;
+      showToast(fallbackText, "message");
     }
 
-    function conversationKey(chatType, id) { return chatType === "direct" ? `dm:${id}` : `group:${id}`; }
+    function conversationKey(chatType, id) {
+      return chatType === "direct" ? `dm:${id}` : `group:${id}`;
+    }
+
     function renderUnreadBadge(key) {
       const count = unreadCounts[key] || 0;
-      return count ? `<span class="unread-badge">${count > 99 ? "99+" : count}</span>` : "";
+      if (!count) return "";
+      return `<span class="unread-badge">${count > 99 ? "99+" : count}</span>`;
     }
+
+    function totalUnread() {
+      return Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+    }
+
     function updateTitle() {
-      const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+      const total = totalUnread();
       document.title = total > 0 ? `(${total}) ${BASE_TITLE}` : BASE_TITLE;
     }
+
     function bumpUnread(key) {
       unreadCounts[key] = (unreadCounts[key] || 0) + 1;
       renderDashboard();
@@ -417,7 +485,12 @@
     }
 
     function focusConversation(type, id, name, isOnline, avatar) {
-      try { window.focus(); } catch (err) {}
+      try {
+        window.focus();
+      } catch (err) {
+        /* focus may be blocked */
+      }
+
       if (type === "group") {
         const group = currentGroups.find(g => String(g.id) === String(id));
         selectChat("group", group ? group.id : id, group ? group.name : (name || "Group chat"), true, avatar || (group && group.avatar) || "");
@@ -433,27 +506,57 @@
       }
     }
 
+    function focusRequestsPanel() {
+      try {
+        window.focus();
+      } catch (err) {
+        /* focus may be blocked */
+      }
+      showDefaultSocialView();
+      const list = document.getElementById("requests-list");
+      if (!list) return;
+      list.scrollIntoView({ behavior: "smooth", block: "center" });
+      list.classList.add("flash");
+      setTimeout(() => list.classList.remove("flash"), 1400);
+    }
+
     function handleServerNotification(data) {
       const meta = data.meta || {};
       const keyPart = meta.from_user || meta.username || meta.group_id || "";
-      deliverNotification({
-        title: data.title || "Chat",
-        body: data.body || "",
-        tag: `server:${data.kind || "event"}:${keyPart}`,
-        onclick: () => {
-          if (data.kind === "group_invite" && meta.group_id != null) {
-            focusConversation("group", meta.group_id, meta.group_name, true, "");
+
+      deliverNotification(
+        {
+          title: data.title || "Chat",
+          body: data.body || "",
+          tag: `server:${data.kind || "event"}:${keyPart}`,
+          onclick: () => {
+            if (data.kind === "friend_request") {
+              focusRequestsPanel();
+            } else if (data.kind === "group_invite" && meta.group_id != null) {
+              focusConversation("group", meta.group_id, meta.group_name, true, "");
+            } else {
+              try {
+                window.focus();
+              } catch (err) {
+                /* focus may be blocked */
+              }
+            }
           }
-        }
-      }, `${data.title || "Chat"}: ${data.body || ""}`);
+        },
+        `${data.title || "Chat"}: ${data.body || ""}`
+      );
     }
 
     function initWebSocket() {
-      socket = new WebSocket("ws://127.0.0.1:8765");
-      socket.onopen = () => socket.send(JSON.stringify({ action: "resume_session", username: currentUser }));
+      socket = createChatSocket();
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ action: "resume_session" }));
+      };
 
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
+
         if (data.action === "dashboard_sync") {
           currentFriends = data.friends;
           currentRequests = data.requests;
@@ -516,14 +619,42 @@
       };
     }
 
-    window.addEventListener("DOMContentLoaded", () => {
+    async function bootstrapSession() {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+        if (!response.ok) {
+          window.location.replace("login.html");
+          return;
+        }
+        const data = await response.json();
+        user = data.user;
+        currentUser = user.username;
+        sessionStorage.setItem("chat_user", JSON.stringify(user));
+      } catch (error) {
+        window.location.replace("login.html");
+        return;
+      }
+
+      document.getElementById("current-user-fullname").textContent =
+        user.full_name || currentUser;
+      document.getElementById("current-user-avatar").innerHTML = renderAvatarHTML(
+        user.avatar,
+        user.full_name || currentUser,
+      );
+
       initWebSocket();
       initNotifications();
-    });
+    }
+
+    window.addEventListener("DOMContentLoaded", bootstrapSession);
 
     function logout() {
-      sessionStorage.removeItem("chat_user");
-      window.location.href = "login.html";
+      fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" })
+        .catch(() => {})
+        .finally(() => {
+          sessionStorage.removeItem("chat_user");
+          window.location.href = "login.html";
+        });
     }
 
     function escapeHtml(str) {
@@ -537,9 +668,12 @@
       showGroupView(cachedGroupMembers);
     }
 
+    // ---------------- INLINE EDIT GROUP PANEL ----------------
+
     function toggleInlineEditGroupPanel() {
       const panel = document.getElementById("inline-edit-group-panel");
       const isClosed = panel.classList.contains("hidden");
+
       if (isClosed && activeChat && activeChat.type === "group") {
         pendingGroupAvatarBase64 = activeChat.avatar || "";
         document.getElementById("inline-group-name-input").value = activeChat.name;
@@ -564,11 +698,13 @@
     function handleInlineGroupAvatarSelected(event) {
       const file = event.target.files[0];
       if (!file) return;
+
       if (file.size > 5 * 1024 * 1024) {
         alert("Image must be under 5MB.");
         event.target.value = "";
         return;
       }
+
       const reader = new FileReader();
       reader.onload = () => {
         pendingGroupAvatarBase64 = reader.result;
@@ -581,16 +717,19 @@
     function saveInlineGroupInfo() {
       if (!activeChat || activeChat.type !== "group") return;
       const newName = document.getElementById("inline-group-name-input").value.trim();
+
       if (!newName) {
         alert("Group name cannot be empty.");
         return;
       }
+
       socket.send(JSON.stringify({
         action: "update_group_info",
         group_id: activeChat.id,
         name: newName,
         avatar: pendingGroupAvatarBase64
       }));
+
       toggleInlineEditGroupPanel();
     }
 
@@ -620,11 +759,13 @@
       document.getElementById("chat-subtitle").textContent = `${members.length} members • ${onlineCount} online`;
 
       const friendUsernames = new Set(currentFriends.map(f => f.username));
+
       const meRecord = members.find(m => m.username === currentUser);
       const amIAdmin = meRecord && meRecord.role === "admin";
 
       updateActiveChatAvatarUI();
 
+      // Show/hide the Edit button in header
       const editGroupBtn = document.getElementById("edit-group-btn");
       if (editGroupBtn) {
         editGroupBtn.classList.toggle("hidden", !amIAdmin);
@@ -652,9 +793,11 @@
         const isExpanded = expandedMemberUsername === member.username;
 
         let badges = [];
+
         if (isAdmin) {
           badges.push(`<span style="font-size: 10px; font-weight: 700; background: rgba(99, 102, 241, 0.2); color: var(--accent); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(99,102,241,0.4);">Admin</span>`);
         }
+
         if (isMe) {
           badges.push(`<span style="font-size: 11px; color: var(--text-muted);">(you)</span>`);
         } else if (isFriend) {
@@ -678,7 +821,11 @@
         topRow.style.cursor = canManage ? "pointer" : "default";
         topRow.style.justifyContent = "space-between";
         topRow.title = canManage ? "Click to manage member" : "";
-        topRow.onclick = () => { if (canManage) toggleMemberDropdown(member.username); };
+        topRow.onclick = () => {
+          if (canManage) {
+            toggleMemberDropdown(member.username);
+          }
+        };
 
         topRow.innerHTML = `
           <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
@@ -738,6 +885,7 @@
       const container = document.getElementById("inline-eligible-friends");
       if (!container) return;
       container.innerHTML = "";
+
       const currentMemberUsernames = new Set(cachedGroupMembers.map(m => m.username));
       const eligibleFriends = currentFriends.filter(f => !currentMemberUsernames.has(f.username));
 
@@ -899,9 +1047,11 @@
 
     function selectChat(type, id, name, isOnline, avatar = "") {
       activeChat = { type, id, name, avatar };
+      if (window.ChatRealtime) window.ChatRealtime.watch(type, id);
       expandedMemberUsername = null;
       document.getElementById("inline-edit-group-panel").classList.add("hidden");
 
+      // Trigger Mobile view transition to active chat screen
       const chatView = document.getElementById("chat-view");
       chatView.classList.remove("social-active");
       chatView.classList.add("chat-active");
@@ -938,7 +1088,11 @@
       renderDashboard();
 
       if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ action: "load_chat", chat_type: type, target_id: id }));
+        socket.send(JSON.stringify({
+          action: "load_chat",
+          chat_type: type,
+          target_id: id
+        }));
       }
     }
 
@@ -966,10 +1120,11 @@
 
     function resetActiveChat() {
       activeChat = null;
+      if (window.ChatRealtime) window.ChatRealtime.watch(null);
       expandedMemberUsername = null;
       document.getElementById("active-chat-avatar-wrapper").style.display = "none";
       document.getElementById("chat-header").textContent = "Select a conversation";
-      document.getElementById("chat-subtitle").textContent = "Choose a friend or group";
+      document.getElementById("chat-subtitle").textContent = "Choose a friend or group from the left";
       document.getElementById("direct-chat-actions").classList.add("hidden");
       document.getElementById("group-chat-actions").classList.add("hidden");
       document.getElementById("edit-group-btn").classList.add("hidden");
@@ -990,32 +1145,44 @@
     function handleIncomingMessage(msg) {
       const isMine = msg.sender === currentUser;
       const key = conversationKey(msg.chat_type, msg.target_id);
-      const isActive = !!activeChat && activeChat.type === msg.chat_type && String(activeChat.id) === String(msg.target_id);
+      const isActive = !!activeChat &&
+        activeChat.type === msg.chat_type &&
+        String(activeChat.id) === String(msg.target_id);
       const isFocused = document.visibilityState === "visible" && document.hasFocus();
 
       if (isActive) {
         appendMessage(msg.sender, msg.text, msg.msg_type || "text", msg.avatar || "");
       }
+
       if (isMine) return;
-      if (!isActive) bumpUnread(key);
+
+      if (!isActive) {
+        bumpUnread(key);
+      }
+
       if (isActive && isFocused) return;
 
-      const previewText = (typeof window.ChatNotify !== "undefined") ? ChatNotify.preview(msg.msg_type, msg.text) : "New message";
+      const previewText = (typeof window.ChatNotify !== "undefined")
+        ? ChatNotify.preview(msg.msg_type, msg.text)
+        : "New message";
 
       if (msg.chat_type === "direct") {
         const friend = currentFriends.find(f => f.username === msg.sender);
         const displayName = msg.sender_name || (friend && friend.full_name) || msg.sender;
+        const icon = msg.avatar || (friend && friend.avatar) || "";
+
         deliverNotification({
           title: displayName,
           body: previewText,
-          icon: msg.avatar || (friend && friend.avatar) || "",
+          icon: icon,
           tag: `dm:${msg.sender}`,
-          onclick: () => focusConversation("direct", msg.sender, displayName, friend ? friend.online : false, msg.avatar)
+          onclick: () => focusConversation("direct", msg.sender, displayName, friend ? friend.online : false, icon)
         }, `${displayName}: ${previewText}`);
       } else {
         const group = currentGroups.find(g => String(g.id) === String(msg.target_id));
         const groupName = msg.group_name || (group && group.name) || "Group chat";
         const senderName = msg.sender_name || msg.sender;
+
         deliverNotification({
           title: groupName,
           body: `${senderName}: ${previewText}`,
@@ -1028,6 +1195,7 @@
     function appendMessage(sender, content, msgType = "text", avatar = "") {
       const box = document.getElementById("chat-box");
       const isMe = sender === currentUser;
+
       const row = document.createElement("div");
       row.className = `msg-row ${isMe ? 'me' : 'them'}`;
 
@@ -1053,6 +1221,7 @@
           <span class="msg-meta-time">${timeStr}</span>
         </div>
       `;
+
       box.appendChild(row);
       box.scrollTop = box.scrollHeight;
     }
@@ -1115,33 +1284,48 @@
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           mediaRecorder = new MediaRecorder(stream);
           audioChunks = [];
-          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
           mediaRecorder.onstop = () => {
-            stream.getTracks().forEach(t => t.stop());
+            stream.getTracks().forEach(track => track.stop());
+
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
             const reader = new FileReader();
             reader.onloadend = () => {
+              const base64Audio = reader.result;
               if (socket && socket.readyState === WebSocket.OPEN && activeChat) {
                 socket.send(JSON.stringify({
                   action: "send_message",
                   chat_type: activeChat.type,
                   target_id: activeChat.id,
-                  text: reader.result,
+                  text: base64Audio,
                   msg_type: "audio"
                 }));
               }
             };
-            reader.readAsDataURL(new Blob(audioChunks, { type: "audio/webm" }));
+            reader.readAsDataURL(audioBlob);
           };
+
           mediaRecorder.start();
           isRecording = true;
           recBtn.classList.add("recording");
+          recBtn.title = "Click to stop and send";
         } catch (err) {
-          alert("Microphone permission denied.");
+          alert("Microphone permission denied or not supported.");
+          console.error("Mic error:", err);
         }
       } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
         isRecording = false;
         recBtn.classList.remove("recording");
+        recBtn.title = "Record Voice Note";
       }
     }
 
@@ -1149,7 +1333,9 @@
       const target = targetUsername || document.getElementById("target-username").value.trim();
       if (target && socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ action: "send_friend_request", to_user: target }));
-        if (!targetUsername) document.getElementById("target-username").value = "";
+        if (!targetUsername) {
+          document.getElementById("target-username").value = "";
+        }
       }
     }
 
@@ -1179,10 +1365,18 @@
       const name = document.getElementById("group-name-input").value.trim();
       const checkboxes = document.querySelectorAll("#group-friends-checklist input[type='checkbox']:checked");
       const selected = Array.from(checkboxes).map(cb => cb.value);
-      if (!name) return alert("Enter a group name.");
+
+      if (!name) {
+        alert("Please enter a group name.");
+        return;
+      }
 
       if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ action: "create_group", name: name, members: selected }));
+        socket.send(JSON.stringify({
+          action: "create_group",
+          name: name,
+          members: selected
+        }));
       }
       closeGroupModal();
     }
@@ -1190,12 +1384,15 @@
     document.getElementById("message-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendMessage();
     });
+
     document.getElementById("target-username").addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendFriendRequest();
     });
+
     document.getElementById("inline-add-username-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitInlineAddMember();
     });
+
     document.getElementById("inline-group-name-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") saveInlineGroupInfo();
     });
