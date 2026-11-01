@@ -15,60 +15,62 @@
       <p>Fill in your details to start chatting</p>
     </div>
 
-    <div class="auth-fields">
-      <div class="field-group">
-        <label for="reg-fullname">Full Name</label>
-        <input 
-          type="text" 
-          id="reg-fullname" 
-          class="input-field" 
-          placeholder="John Doe" 
-          autofocus 
-        />
-      </div>
+    <form id="register-form" onsubmit="event.preventDefault(); submitRegister();">
+      <div class="auth-fields">
+        <div class="field-group">
+          <label for="reg-fullname">Full Name</label>
+          <input 
+            type="text" 
+            id="reg-fullname" 
+            class="input-field" 
+            placeholder="John Doe" 
+            autofocus 
+          />
+        </div>
 
-      <div class="field-group">
-        <label for="reg-username">Username</label>
-        <input 
-          type="text" 
-          id="reg-username" 
-          class="input-field" 
-          placeholder="johndoe" 
-        />
-      </div>
+        <div class="field-group">
+          <label for="reg-username">Username</label>
+          <input 
+            type="text" 
+            id="reg-username" 
+            class="input-field" 
+            placeholder="johndoe" 
+          />
+        </div>
 
-      <div class="field-group">
-        <label for="reg-email">Email Address</label>
-        <input 
-          type="email" 
-          id="reg-email" 
-          class="input-field" 
-          placeholder="john@example.com" 
-        />
-      </div>
+        <div class="field-group">
+          <label for="reg-email">Email Address</label>
+          <input 
+            type="email" 
+            id="reg-email" 
+            class="input-field" 
+            placeholder="john@example.com" 
+          />
+        </div>
 
-      <div class="field-group">
-        <label for="reg-password">Password</label>
-        <input 
-          type="password" 
-          id="reg-password" 
-          class="input-field" 
-          placeholder="••••••••" 
-        />
-      </div>
+        <div class="field-group">
+          <label for="reg-password">Password</label>
+          <input 
+            type="password" 
+            id="reg-password" 
+            class="input-field" 
+            placeholder="••••••••" 
+          />
+        </div>
 
-      <div class="field-group">
-        <label for="reg-confirm-password">Confirm Password</label>
-        <input 
-          type="password" 
-          id="reg-confirm-password" 
-          class="input-field" 
-          placeholder="••••••••" 
-        />
-      </div>
+        <div class="field-group">
+          <label for="reg-confirm-password">Confirm Password</label>
+          <input 
+            type="password" 
+            id="reg-confirm-password" 
+            class="input-field" 
+            placeholder="••••••••" 
+          />
+        </div>
 
-      <button id="reg-btn" class="btn btn-primary" onclick="submitRegister()">Sign Up</button>
-    </div>
+        <button type="submit" id="reg-btn" class="btn btn-primary">Sign Up</button>
+      </div>
+    </form>
 
     <div id="feedback" class="auth-feedback hidden"></div>
 
@@ -105,6 +107,16 @@
         const data = JSON.parse(event.data);
         if (data.action === "auth_error") {
           showFeedback(data.text, true);
+
+          // Clear only password fields; retain name, username, and email
+          const pw = document.getElementById("reg-password");
+          const cpw = document.getElementById("reg-confirm-password");
+          pw.value = "";
+          cpw.value = "";
+          pw.focus();
+
+          const btn = document.getElementById("reg-btn");
+          if (btn) btn.disabled = false;
         } else if (data.action === "register_success") {
           showFeedback(data.text + " Redirecting to login...", false);
           setTimeout(() => {
@@ -115,33 +127,40 @@
 
       socket.onerror = () => {
         showFeedback("Could not connect to the chat server.", true);
+        const btn = document.getElementById("reg-btn");
+        if (btn) btn.disabled = false;
       };
 
       socket.onclose = () => {
-        showFeedback("Cannot connect to the server. Please refresh and retry.", true);
+        showFeedback("Cannot connect to the server. Please try again.", true);
+        const btn = document.getElementById("reg-btn");
+        if (btn) btn.disabled = false;
       };
     }
 
     function submitRegister() {
-      const full_name = document.getElementById("reg-fullname").value.trim();
+      const fullName = document.getElementById("reg-fullname").value.trim();
       const username = document.getElementById("reg-username").value.trim();
       const email = document.getElementById("reg-email").value.trim();
       const password = document.getElementById("reg-password").value;
-      const confirm_password = document.getElementById("reg-confirm-password").value;
+      const confirmPassword = document.getElementById("reg-confirm-password").value;
 
-      if (!full_name || !username || !email || !password || !confirm_password) {
+      if (!fullName || !username || !email || !password || !confirmPassword) {
         showFeedback("All fields are required.", true);
         return;
       }
 
-      if (password !== confirm_password) {
+      if (password !== confirmPassword) {
         showFeedback("Passwords do not match. Please verify and re-enter.", true);
+        document.getElementById("reg-confirm-password").value = "";
         document.getElementById("reg-confirm-password").focus();
         return;
       }
 
       if (password.length < 6) {
         showFeedback("Password must be at least 6 characters long.", true);
+        document.getElementById("reg-password").value = "";
+        document.getElementById("reg-confirm-password").value = "";
         document.getElementById("reg-password").focus();
         return;
       }
@@ -152,22 +171,17 @@
         return;
       }
 
+      const btn = document.getElementById("reg-btn");
+      if (btn) btn.disabled = true;
+
       socket.send(JSON.stringify({
         action: "register",
-        full_name: full_name,
+        full_name: fullName,
         username: username,
         email: email,
         password: password
       }));
     }
-
-    document.getElementById("reg-password").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitRegister();
-    });
-
-    document.getElementById("reg-confirm-password").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitRegister();
-    });
 
     window.addEventListener("DOMContentLoaded", initSocket);
   </script>
